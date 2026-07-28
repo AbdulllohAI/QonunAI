@@ -336,9 +336,10 @@ class ReasoningEngine:
             )
 
         # The model's own inline "Risk level: X" line can under-state what
-        # assess() just decided (it takes the higher of the two) — rewrite it
-        # so the answer body never contradicts the risk badge shown next to it.
-        answer_text = risk_mod.rewrite_stated_risk(validation.text, assessment.level)
+        # assess() just decided (it takes the higher of the two), or be
+        # missing outright — reconcile or synthesise it so the answer body
+        # never contradicts (or omits) the risk badge shown next to it.
+        answer_text = risk_mod.ensure_stated_risk(validation.text, assessment, lang)
 
         return LegalAnswer(
             answer=answer_text,

@@ -556,6 +556,38 @@ def test_rewrite_stated_risk_preserves_surrounding_text():
     assert rewritten == "Javob [S1]. Уровень риска: LOW — bir gap."
 
 
+def test_ensure_stated_risk_reconciles_an_existing_line():
+    # Delegates to rewrite_stated_risk when the model did include a line —
+    # no duplicate section gets appended on top of it.
+    answer = "Javob [S1]. Risk level: MEDIUM — sabab."
+    assessment = risk_mod.RiskAssessment(level=risk_mod.RiskLevel.HIGH, factors=["x"])
+    result = risk_mod.ensure_stated_risk(answer, assessment, Language.EN)
+    assert result == "Javob [S1]. Risk level: HIGH — sabab."
+    assert result.count("Risk level") == 1
+
+
+def test_ensure_stated_risk_synthesises_a_missing_line():
+    # The model skipped the section entirely — one must still appear, using
+    # the same assessment that drives the risk badge, so body and badge
+    # can't diverge either way.
+    answer = "**Manbalar**\n\n* [S1] 44-modda."
+    assessment = risk_mod.RiskAssessment(
+        level=risk_mod.RiskLevel.HIGH, factors=["Subject matter involves criminal liability."]
+    )
+    result = risk_mod.ensure_stated_risk(answer, assessment, Language.UZ_LATN)
+    assert result.startswith(answer)
+    assert "Xavf darajasi" in result
+    assert "HIGH" in result
+    assert "criminal liability" in result
+
+
+def test_ensure_stated_risk_localises_the_label_per_language():
+    assessment = risk_mod.RiskAssessment(level=risk_mod.RiskLevel.LOW, factors=["Routine."])
+    assert "Уровень риска" in risk_mod.ensure_stated_risk("Javob.", assessment, Language.RU)
+    assert "Хавф даражаси" in risk_mod.ensure_stated_risk("Javob.", assessment, Language.UZ_CYRL)
+    assert "Risk level" in risk_mod.ensure_stated_risk("Javob.", assessment, Language.EN)
+
+
 def test_rewrite_stated_risk_is_a_noop_without_a_stated_line():
     answer = "Javob faqat matn, hech qanday risk yorlig'isiz [S1]."
     assert risk_mod.rewrite_stated_risk(answer, risk_mod.RiskLevel.HIGH) == answer

@@ -76,7 +76,8 @@ doctrinal and never binding. Label both as such when you rely on them.
 ## Answer structure
 
 Produce these sections, in this order, using the section headings in the answer \
-language:
+language. Every section is required, including Risk level — do not drop it even if \
+earlier sections ran long:
 
 **Short answer** — two or three sentences that directly answer the question, with \
 citations.
@@ -118,7 +119,8 @@ retrieved Uzbek legal provisions. Every legal assertion about Uzbek law must cit
 source tag `[S1]`, `[S2]`, ... . Statements about the document itself should quote or \
 paraphrase the clause you are describing.
 
-Produce:
+Produce every section below, including Overall risk level — do not drop it even if \
+earlier sections ran long:
 
 **Summary** — what this document is, who the parties are, what it obliges them to do.
 

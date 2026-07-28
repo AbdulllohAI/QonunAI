@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
-from app.db.models import ActType
+from app.db.models import ActType, Language
 from app.services.rag.types import RetrievedChunk
 
 
@@ -66,16 +66,24 @@ class RiskAssessment:
 
 
 _STATED_RE = re.compile(
-    r"(?:risk\s*level|xavf\s*darajasi|уровень\s*риска)\s*[:\-–]?\s*\**\s*"
-    r"(LOW|MEDIUM|HIGH|PAST|OʻRTA|O‘RTA|ORTA|YUQORI|НИЗКИЙ|СРЕДНИЙ|ВЫСОКИЙ)",
+    r"(?:risk\s*level|xavf\s*darajasi|хавф\s*даражаси|уровень\s*риска)\s*[:\-–]?\s*\**\s*"
+    r"(LOW|MEDIUM|HIGH|PAST|OʻRTA|O‘RTA|ORTA|YUQORI|НИЗКИЙ|СРЕДНИЙ|ВЫСОКИЙ|ПАСТ|ЎРТА|ЮҚОРИ)",
     re.IGNORECASE,
 )
 
+_RISK_LABEL_BY_LANG: dict[Language, str] = {
+    Language.EN: "Risk level",
+    Language.UZ_LATN: "Xavf darajasi",
+    Language.UZ_CYRL: "Хавф даражаси",
+    Language.RU: "Уровень риска",
+}
+
 _STATED_MAP = {
-    "low": RiskLevel.LOW, "past": RiskLevel.LOW, "низкий": RiskLevel.LOW,
+    "low": RiskLevel.LOW, "past": RiskLevel.LOW, "низкий": RiskLevel.LOW, "паст": RiskLevel.LOW,
     "medium": RiskLevel.MEDIUM, "oʻrta": RiskLevel.MEDIUM, "o‘rta": RiskLevel.MEDIUM,
-    "orta": RiskLevel.MEDIUM, "средний": RiskLevel.MEDIUM,
+    "orta": RiskLevel.MEDIUM, "средний": RiskLevel.MEDIUM, "ўрта": RiskLevel.MEDIUM,
     "high": RiskLevel.HIGH, "yuqori": RiskLevel.HIGH, "высокий": RiskLevel.HIGH,
+    "юқори": RiskLevel.HIGH,
 }
 
 
@@ -104,6 +112,36 @@ def rewrite_stated_risk(answer: str, final: RiskLevel) -> str:
         return answer
     start, end = match.span(1)
     return answer[:start] + final.value.upper() + answer[end:]
+
+
+def ensure_stated_risk(answer: str, assessment: RiskAssessment, lang: Language) -> str:
+    """Guarantee a risk-level line is present and matches `assessment.level`.
+
+    The system prompt *asks* every mode for a risk-level section, but asking
+    is not enforcement — smaller/faster models in particular sometimes drop a
+    trailing required section under time or length pressure, same failure
+    mode a prompt-only citation rule would have if the validator didn't back
+    it mechanically. If the model's own line is present, its token is
+    reconciled to the final level (`rewrite_stated_risk`); if it's missing
+    entirely, one is synthesised from `assessment` — the same data already
+    driving the risk badge, so body and badge can never silently diverge
+    either way.
+
+    The synthesised line's label is localised to the answer's language (to
+    match the model's own convention); the value stays the literal English
+    token, same as the model is instructed to use; the justification is
+    built from `assessment.factors`, which are deterministic English strings
+    not localised per-language — an acceptable seam for a fallback path that,
+    by definition, only fires when the model didn't supply its own (already
+    localised) justification.
+    """
+    if _STATED_RE.search(answer):
+        return rewrite_stated_risk(answer, assessment.level)
+
+    label = _RISK_LABEL_BY_LANG.get(lang, _RISK_LABEL_BY_LANG[Language.EN])
+    justification = "; ".join(assessment.factors) or "Assessed from the retrieved provisions."
+    line = f"\n\n**{label}** {assessment.level.value.upper()} — {justification}"
+    return answer.rstrip() + line
 
 
 def assess(
