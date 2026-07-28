@@ -184,6 +184,55 @@ def _check_act_attribution(
     return mislabelled, uncited
 
 
+def annotate_mislabelled(
+    text: str, mislabelled: list[MislabelledCitation], sources: list[SourceRef]
+) -> str:
+    """Insert an inline correction right after each mislabelled tag.
+
+    `_check_act_attribution` already finds these; leaving the fix only in a
+    warning paragraph at the end means the wrong act name still sits,
+    unchallenged, exactly where the reader is looking. Rewriting the claimed
+    act name itself in place is tempting but risky — it is usually inflected
+    ("Fuqarolik kodeksining", "Уголовного кодекса"), and swapping in a
+    replacement without knowing the correct grammatical case can produce
+    broken prose in any of the three scripts. Appending a parenthetical next
+    to the tag instead sidesteps that entirely: it's always grammatically
+    safe, and it corrects the record exactly where the reader's eye already
+    is, without requiring them to cross-reference the warning at the end.
+
+    Re-derives the same "nearest preceding act mention" match
+    `_check_act_attribution` used, rather than threading position data
+    through `MislabelledCitation` — must be called with the same `text` that
+    was passed to `_check_act_attribution`, since the window search is
+    deterministic but position-dependent.
+    """
+    if not mislabelled:
+        return text
+    key_by_tag = {s.tag: act_key(s.chunk.law_name) for s in sources}
+    flagged = {(m.tag, m.claimed) for m in mislabelled}
+
+    insertions: list[tuple[int, str]] = []
+    for match in _TAG_RE.finditer(text):
+        tag = match.group(1)
+        actual = key_by_tag.get(tag)
+        if actual is None:
+            continue
+        window = text[max(0, match.start() - _ATTRIBUTION_WINDOW) : match.start()]
+        claimed = None
+        best = -1
+        for key, pattern in _ACT_KEYS:
+            for m in pattern.finditer(window):
+                if m.start() > best:
+                    best, claimed = m.start(), key
+        if claimed and (tag, claimed) in flagged:
+            label = _ACT_LABELS.get(actual, actual)
+            insertions.append((match.end(), f" *(actually {label})*"))
+
+    for pos, snippet in sorted(insertions, key=lambda x: x[0], reverse=True):
+        text = text[:pos] + snippet + text[pos:]
+    return text
+
+
 def validate(
     answer: str,
     sources: list[SourceRef],
@@ -213,6 +262,7 @@ def validate(
                 unverified.append(num)
 
     mislabelled, uncited_acts = _check_act_attribution(text, sources)
+    text = annotate_mislabelled(text, mislabelled, sources)
 
     has_citations = bool(used)
 

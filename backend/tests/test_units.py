@@ -435,6 +435,29 @@ def test_act_attribution_matches_across_scripts():
     )
 
 
+def test_mislabelled_citation_gets_an_inline_correction():
+    """The wrong act name stays in the prose (rewriting an inflected act name
+    in place risks broken grammar across scripts), but the correction now
+    sits right next to the tag instead of only in a warning paragraph the
+    reader has to cross-reference separately."""
+    sources = [_source_named("S1", _TAX_RU, "424"), _source_named("S2", _CIVIL_UZC, "575")]
+    result = validator_mod.validate(
+        "Yer uchastkasini ijaraga olish tartibi Fuqarolik kodeksida [S2] "
+        "va Yer kodeksida [S1] belgilab qo'yilgan.",
+        sources,
+    )
+    assert "[S1] *(actually Tax Code)*" in result.text
+    assert "[S2] va" in result.text  # correctly-attributed S2 is left untouched
+
+
+def test_annotate_mislabelled_is_a_noop_when_nothing_flagged():
+    sources = [_source_named("S2", _CIVIL_UZC, "575")]
+    result = validator_mod.validate(
+        "Fuqarolik kodeksining 575-moddasiga ko'ra [S2] shartnoma tuziladi.", sources
+    )
+    assert "actually" not in result.text
+
+
 def test_long_uncited_answer_is_rejected():
     sources = [_source("S1", "54")]
     result = validator_mod.validate("Legal prose without any citation. " * 30, sources)

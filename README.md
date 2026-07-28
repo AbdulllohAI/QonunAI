@@ -10,7 +10,7 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2015-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-79%20passing-2ea44f)](backend/tests/test_units.py)
+[![Tests](https://img.shields.io/badge/tests-81%20passing-2ea44f)](backend/tests/test_units.py)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -112,14 +112,19 @@ enforced mechanically, not just requested:
    the sources don't cover the question.
 3. **The validator then checks the output against that recorded tag set.**
    Tags outside it are stripped from the answer. Article numbers asserted in
-   prose but absent from retrieval are flagged as unverified — this is the
-   exact mechanism that caught a real case during testing where the model
-   named an article that was retrieved under a different act than it claimed
-   in its own prose, and surfaced a visible warning instead of letting the
-   mismatch through silently. A substantive answer with no citations at all
-   is rejected outright and replaced with an honest "not found" message.
-4. The risk scorer runs independently of the model's own risk claim and takes
-   the **higher** of the two.
+   prose but absent from retrieval are flagged as unverified. A tag attributed
+   in prose to the wrong act (real tag, real article, just the wrong law
+   named next to it — the subtlest of the three failure modes, since both the
+   tag and the article number check out individually) gets an inline
+   correction appended right where the false claim was made, not just a
+   warning at the end the reader has to cross-reference. A substantive answer
+   with no citations at all is rejected outright and replaced with an honest
+   "not found" message.
+4. The risk scorer runs independently of the model's own risk claim, takes
+   the **higher** of the two, and is guaranteed to actually appear in the
+   answer — if the model's own structured output drops the risk-level line
+   under length pressure, one is synthesised from the same assessment
+   driving the badge, so the two can never silently diverge.
 5. The streamed `done` event carries the *validated* text, and the client
    swaps it in — so a stripped citation never stays on screen, even for the
    tokens that streamed before validation ran.
@@ -179,7 +184,7 @@ Full instructions, including crawling lex.uz directly: [`docs/DEPLOYMENT.md`](do
 cd backend && pytest tests/ -v
 ```
 
-79 unit tests, no database or network required — verified passing. They cover
+81 unit tests, no database or network required — verified passing. They cover
 the places where a silent regression is most damaging: transliteration (halves
 Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
 validation (hallucinations reaching users), and the hierarchy-of-force rules
