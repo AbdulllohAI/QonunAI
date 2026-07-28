@@ -31,6 +31,14 @@ the Constitution and Codes, never a guess from the model's own training data.
 mandatory Uzbek law, with concrete risks and redrafting suggestions — not a
 generic "looks fine to me."
 
+## 🎬 Demo
+
+<div align="center">
+<img src="assets/demo.gif" alt="HuquqAI live demo — asking a legal question and getting a cited, risk-scored answer" width="720"/>
+</div>
+
+*Real conversation against the actual running app — retrieval, LLM generation, and citation-tagged output, not a mockup.*
+
 ## 🏆 Key features
 
 | | |
