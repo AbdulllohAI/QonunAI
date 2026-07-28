@@ -215,10 +215,17 @@ Being direct about these rather than glossing over them:
   question on those topics correctly says the retrieved sources don't cover
   it rather than guessing, but there's no real answer behind that honesty
   yet — load more acts via the ingestion connectors to close the gap.
-- **CPU-only embedding and reranking is slow.** With no GPU, a query that
-  retrieves against the full corpus (rather than a narrower, act-type-
-  filtered one) can take 1–3 minutes end to end. `EMBEDDING_DEVICE=cuda` is
-  supported and meaningfully changes this if a GPU is available.
+- **CPU-only embedding and reranking is slow.** A query that retrieves
+  against the full corpus (rather than a narrower, act-type-filtered one) can
+  take 1–3 minutes end to end on CPU alone. `EMBEDDING_DEVICE=cuda` fixes
+  this if a GPU is available — verified on an RTX 4050 (6 GB): retrieval
+  dropped from 56–100s to **~11s**, roughly a 5–9x speedup, with the
+  embedder and reranker actually saturating the GPU at ~100% utilization
+  during a query. See the GPU section in
+  [`.env.example`](.env.example) for what else that needs (a CUDA torch
+  build via `TORCH_INDEX_URL`, the backend's GPU device reservation in
+  `docker-compose.yml`, and `UVICORN_WORKERS=1` so two worker processes
+  don't each load their own copy of both models onto the same card).
 - **Free-tier LLM providers have real, sometimes surprising limits.** Groq's
   free "on_demand" tier shares one daily token quota per *organization*, not
   per key — issuing a new key under the same account doesn't get you a fresh

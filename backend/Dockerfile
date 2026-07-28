@@ -24,8 +24,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY requirements.txt .
-# CPU-only torch keeps the image ~2 GB smaller; override for a GPU deployment.
-RUN pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu \
+# CPU-only torch keeps the image ~2 GB smaller and needs no host GPU/driver —
+# the safe default. Override TORCH_INDEX_URL to a CUDA wheel index (e.g.
+# https://download.pytorch.org/whl/cu124) for a GPU deployment; the compose
+# file wires this to the TORCH_INDEX_URL env var.
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch==2.5.1 --index-url ${TORCH_INDEX_URL} \
     && pip install --no-cache-dir -r requirements.txt
 
 # Create the user and hand over ownership *before* downloading the model
@@ -55,4 +59,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
     CMD curl -fsS http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Default 2 workers parallelizes CPU-bound embedding/reranking across cores.
+# On a single GPU, multiple worker processes would each load their own copy
+# of both models onto the same limited VRAM instead of actually running in
+# parallel (CUDA serializes anyway) — set UVICORN_WORKERS=1 for a GPU deploy.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2}"]

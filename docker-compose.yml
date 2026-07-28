@@ -62,7 +62,14 @@ services:
       context: ./backend
       args:
         PREFETCH_MODELS: "true"
-    environment: *backend-env
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+    environment:
+      <<: *backend-env
+      # Single worker on a GPU: multiple uvicorn workers would each load their
+      # own copy of the embedder + reranker onto the same limited VRAM instead
+      # of actually running in parallel (CUDA serializes anyway). Irrelevant
+      # on CPU, where 2 workers parallelizes across cores as before.
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
     volumes:
       - ./backend/app:/app/app
       - ./backend/data:/app/data
@@ -74,15 +81,34 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Requires the NVIDIA Container Toolkit on the host (already present here —
+    # `docker info` shows the `nvidia` runtime registered). On a machine
+    # without it, remove this block and set EMBEDDING_DEVICE=cpu instead.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     command: >
       sh -c "alembic upgrade head &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2}"
     restart: unless-stopped
 
   worker:
     build:
       context: ./backend
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      # Deliberately stays CPU-only even when the backend uses GPU: this
+      # image doesn't build with the CUDA torch wheel (no TORCH_INDEX_URL
+      # build arg here), and it isn't granted GPU device access below either
+      # — setting EMBEDDING_DEVICE=cuda here would just crash on the first
+      # embedding call. Background ingestion isn't latency-critical the way
+      # live queries are, so it's not worth the added VRAM contention with
+      # the backend's own model copies on a single 6 GB card.
+      EMBEDDING_DEVICE: cpu
     volumes:
       - ./backend/app:/app/app
       - ./backend/data:/app/data
