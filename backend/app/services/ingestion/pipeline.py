@@ -146,7 +146,13 @@ class IngestionPipeline:
                 doc_number=raw.doc_number,
                 date_of_adoption=raw.date_of_adoption,
                 date_in_force=raw.date_in_force,
-                last_updated=raw.last_updated or date.today(),
+                # Never fall back to today's date here: that would present
+                # our own ingestion run as if it were the law's actual last
+                # amendment date, indistinguishable from a real one to any
+                # downstream reader (LLM or human). When the connector
+                # couldn't parse a real amendment date off the source page,
+                # we genuinely don't know one — leave it null.
+                last_updated=raw.last_updated,
                 issuing_body=raw.issuing_body,
                 source=raw.source,
                 external_id=raw.external_id,
@@ -176,7 +182,11 @@ class IngestionPipeline:
         existing.doc_number = raw.doc_number or existing.doc_number
         existing.date_of_adoption = raw.date_of_adoption or existing.date_of_adoption
         existing.date_in_force = raw.date_in_force or existing.date_in_force
-        existing.last_updated = raw.last_updated or date.today()
+        # Same reasoning as the create path above: only overwrite with a
+        # date the connector actually parsed off the source, never today's
+        # date as a stand-in for "we don't know."
+        if raw.last_updated:
+            existing.last_updated = raw.last_updated
         existing.issuing_body = raw.issuing_body or existing.issuing_body
         existing.source_url = raw.source_url
         existing.content_hash = content_hash

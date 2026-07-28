@@ -199,7 +199,13 @@ class CsvSeedLoader:
                 )
             )
             existing.content_hash = content_hash
-            existing.last_updated = date.today()
+            # Not touched: a bare CSV carries no real legislative amendment
+            # date, and stamping today's re-ingestion date here reads to a
+            # downstream LLM as "this law was amended today" — the exact
+            # confusion a QA pass caught it presenting as fact. Leave
+            # last_updated null for CSV-seeded acts; a real connector
+            # (lexuz.py, norma.py) that actually parses the source page's own
+            # amendment date is the only legitimate way to populate it.
             await session.flush()
             return existing
 
@@ -211,7 +217,7 @@ class CsvSeedLoader:
             title_ru=title if language is Language.RU else None,
             title_en=title if language is Language.EN else None,
             date_of_adoption=date_of_adoption,
-            last_updated=date.today(),
+            last_updated=None,
             source=SourceSystem.SEED_CSV,
             external_id=external_id,
             source_url=source_url,
