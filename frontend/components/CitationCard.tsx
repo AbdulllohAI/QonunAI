@@ -4,7 +4,7 @@ import { ExternalLink, Info, Link2 } from "lucide-react";
 import type { Citation } from "@/lib/types";
 import { ACT_TYPE_LABELS, ACT_TYPE_STYLES, cn, isBinding } from "@/lib/utils";
 
-export function CitationCard({ citation }: { citation: Citation }) {
+export function CitationCard({ citation, index }: { citation: Citation; index: number }) {
   const binding = isBinding(citation.act_type);
 
   return (
@@ -15,8 +15,11 @@ export function CitationCard({ citation }: { citation: Citation }) {
       )}
     >
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-        <span className="rounded bg-blue-700 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white">
-          {citation.tag}
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-700 text-[10px] font-semibold text-white"
+          title={citation.tag}
+        >
+          {index}
         </span>
         <span className={cn("badge", ACT_TYPE_STYLES[citation.act_type] ?? "bg-zinc-100")}>
           {ACT_TYPE_LABELS[citation.act_type] ?? citation.act_type}
@@ -71,6 +74,10 @@ export function CitationList({
   title: string;
 }) {
   if (!citations.length) return null;
+  // Index by position in the full list, before splitting into primary/
+  // supporting — must match renumberCitations' ordering exactly, since that
+  // function numbers the inline superscripts from this same array/order.
+  const indexByTag = new Map(citations.map((c, i) => [c.tag, i + 1]));
   const primary = citations.filter((c) => !c.supporting);
   const supporting = citations.filter((c) => c.supporting);
 
@@ -81,7 +88,7 @@ export function CitationList({
       </h4>
       <div className="space-y-2">
         {primary.map((c) => (
-          <CitationCard key={c.chunk_id + c.tag} citation={c} />
+          <CitationCard key={c.chunk_id + c.tag} citation={c} index={indexByTag.get(c.tag)!} />
         ))}
       </div>
       {supporting.length > 0 && (
@@ -91,7 +98,7 @@ export function CitationList({
           </h4>
           <div className="space-y-2">
             {supporting.map((c) => (
-              <CitationCard key={c.chunk_id + c.tag} citation={c} />
+              <CitationCard key={c.chunk_id + c.tag} citation={c} index={indexByTag.get(c.tag)!} />
             ))}
           </div>
         </>

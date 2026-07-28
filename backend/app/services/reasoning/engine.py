@@ -380,11 +380,15 @@ class ReasoningEngine:
                 refusal_reason=validation.reason,
             )
 
-        # The model's own inline "Risk level: X" line can under-state what
-        # assess() just decided (it takes the higher of the two), or be
-        # missing outright — reconcile or synthesise it so the answer body
-        # never contradicts (or omits) the risk badge shown next to it.
-        answer_text = risk_mod.ensure_stated_risk(validation.text, assessment, lang)
+        # The prompt now explicitly tells the model NOT to write its own
+        # "Risk level" line — the badge (driven by `assessment` below) is
+        # the sole, always-accurate risk indicator, and a hand-written line
+        # in the body would just be the kind of redundant clutter this
+        # change is meant to remove. Reconcile only stays as a safety net:
+        # if the model mentions a risk level anyway (drift, habit), this
+        # rewrites its value to match rather than leaving a contradiction —
+        # but it never inserts one that wasn't there.
+        answer_text = risk_mod.rewrite_stated_risk(validation.text, assessment.level)
 
         return LegalAnswer(
             answer=answer_text,

@@ -62,3 +62,40 @@ export function formatMs(ms: number): string {
 export function uid(): string {
   return Math.random().toString(36).slice(2, 11);
 }
+
+const SUPERSCRIPT_DIGITS: Record<string, string> = {
+  "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+  "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+};
+
+function toSuperscript(n: number): string {
+  return String(n)
+    .split("")
+    .map((d) => SUPERSCRIPT_DIGITS[d] ?? d)
+    .join("");
+}
+
+/**
+ * The backend's `[S1]`/`[S2]` tags are the citation-validation mechanism
+ * itself — the model is instructed to cite only those tags, and the
+ * validator strips or flags anything that doesn't resolve to a real
+ * retrieved source. They're load-bearing for the backend and need to stay
+ * in the text it validates; they're just not something a reader should have
+ * to look at. Renumber them here, purely for display, to small superscripts
+ * matching each source's position in the Sources panel below (which is
+ * already in first-appearance order) — so "[S7]" in raw model output
+ * becomes "¹" if it's the first citation actually used, "²" for the second
+ * distinct one, and so on, with the same numbering in both places.
+ */
+export function renumberCitations(text: string, citations: { tag: string }[]): string {
+  const order = new Map<string, number>();
+  citations.forEach((c, i) => {
+    if (!order.has(c.tag)) order.set(c.tag, i + 1);
+  });
+  return text.replace(/(?:\[S\d+\])+/g, (run) => {
+    const nums = Array.from(run.matchAll(/\[S(\d+)\]/g))
+      .map((m) => order.get(`S${m[1]}`))
+      .filter((n): n is number => n !== undefined);
+    return nums.map(toSuperscript).join(",");
+  });
+}

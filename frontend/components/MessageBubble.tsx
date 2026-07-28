@@ -8,7 +8,7 @@ import { HierarchyPanel } from "./HierarchyPanel";
 import { RiskBadge } from "./RiskBadge";
 import { t } from "@/lib/i18n";
 import type { ChatMessage, Language } from "@/lib/types";
-import { cn, formatMs } from "@/lib/utils";
+import { cn, formatMs, renumberCitations } from "@/lib/utils";
 
 export function MessageBubble({ message, lang }: { message: ChatMessage; lang: Language }) {
   const isUser = message.role === "user";
@@ -41,7 +41,9 @@ export function MessageBubble({ message, lang }: { message: ChatMessage; lang: L
         ) : (
           <>
             <div className="card legal-prose answer-md p-4 text-sm">
-              <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+              <Markdown remarkPlugins={[remarkGfm]}>
+                {renumberCitations(message.content, message.citations ?? [])}
+              </Markdown>
               {message.streaming && (
                 <span className="ml-0.5 inline-flex gap-0.5" aria-label="generating">
                   <span className="typing-dot">●</span>
