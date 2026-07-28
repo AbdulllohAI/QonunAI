@@ -1,4 +1,4 @@
-# HuquqAI — Architecture
+# QonunAI — Architecture
 
 ## 1. System overview
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚖️ HuquqAI
+# ⚖️ QonunAI
 
 **An AI legal research platform for the Republic of Uzbekistan — a hybrid-RAG system that answers legal questions in Uzbek (Latin & Cyrillic), Russian, and English, grounded in real statutory text with verifiable article-level citations.**
 
@@ -34,7 +34,7 @@ generic "looks fine to me."
 ## 🎬 Demo
 
 <div align="center">
-<img src="assets/demo.gif" alt="HuquqAI live demo — asking a legal question and getting a cited, risk-scored answer" width="720"/>
+<img src="assets/demo.gif" alt="QonunAI live demo — asking a legal question and getting a cited, risk-scored answer" width="720"/>
 </div>
 
 *Real conversation against the actual running app — retrieval, LLM generation, and citation-tagged output, not a mockup.*
@@ -120,11 +120,11 @@ enforced mechanically, not just requested:
    warning at the end the reader has to cross-reference. A substantive answer
    with no citations at all is rejected outright and replaced with an honest
    "not found" message.
-4. The risk scorer runs independently of the model's own risk claim, takes
-   the **higher** of the two, and is guaranteed to actually appear in the
-   answer — if the model's own structured output drops the risk-level line
-   under length pressure, one is synthesised from the same assessment
-   driving the badge, so the two can never silently diverge.
+4. The risk scorer runs independently of the model's own risk claim (if it
+   makes one — the prompt asks it not to, since the risk badge already
+   renders this from the same structured assessment) and takes the
+   **higher** of the two. If the model states a level anyway, it's
+   reconciled to match rather than left to silently contradict the badge.
 5. The streamed `done` event carries the *validated* text, and the client
    swaps it in — so a stripped citation never stays on screen, even for the
    tokens that streamed before validation ran.

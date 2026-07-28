@@ -1,4 +1,4 @@
-"""Initial HuquqAI schema.
+"""Initial QonunAI schema.
 
 Revision ID: 0001_initial
 Create Date: 2026-07-25

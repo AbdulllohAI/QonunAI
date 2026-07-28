@@ -80,7 +80,7 @@ export function MessageBubble({ message, lang }: { message: ChatMessage; lang: L
 
             {message.disclaimer && !message.streaming && (
               <p className="border-t border-[rgb(var(--border))] pt-2 text-[11px] italic opacity-50">
-                {message.disclaimer}
+                ℹ️ {message.disclaimer}
               </p>
             )}
           </>

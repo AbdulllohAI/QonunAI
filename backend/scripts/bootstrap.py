@@ -143,7 +143,7 @@ async def seed_lexuz(
 
 
 async def main() -> None:
-    parser = argparse.ArgumentParser(description="Bootstrap HuquqAI")
+    parser = argparse.ArgumentParser(description="Bootstrap QonunAI")
     parser.add_argument("--admin", help="admin email to create")
     parser.add_argument("--admin-password", help="admin password (prompted if omitted)")
     parser.add_argument(

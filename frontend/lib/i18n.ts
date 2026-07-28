@@ -3,7 +3,7 @@ import type { Language } from "./types";
 /** UI strings. Uzbek Latin is the primary locale — it is the state language. */
 export const STRINGS = {
   "uz-Latn": {
-    appName: "HuquqAI",
+    appName: "QonunAI",
     tagline: "O‘zbekiston qonunchiligi bo‘yicha AI yordamchi",
     chat: "Suhbat",
     search: "Qonun qidirish",
@@ -40,7 +40,7 @@ export const STRINGS = {
     examples: "Namunaviy savollar",
   },
   "uz-Cyrl": {
-    appName: "HuquqAI",
+    appName: "QonunAI",
     tagline: "Ўзбекистон қонунчилиги бўйича AI ёрдамчи",
     chat: "Суҳбат",
     search: "Қонун қидириш",
@@ -77,7 +77,7 @@ export const STRINGS = {
     examples: "Намунавий саволлар",
   },
   ru: {
-    appName: "HuquqAI",
+    appName: "QonunAI",
     tagline: "AI-помощник по законодательству Узбекистана",
     chat: "Чат",
     search: "Поиск закона",
@@ -114,7 +114,7 @@ export const STRINGS = {
     examples: "Примеры вопросов",
   },
   en: {
-    appName: "HuquqAI",
+    appName: "QonunAI",
     tagline: "AI legal assistant for the law of Uzbekistan",
     chat: "Chat",
     search: "Law search",

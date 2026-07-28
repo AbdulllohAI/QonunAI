@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "HuquqAI — Uzbekistan legal research",
+  title: "QonunAI — Uzbekistan legal research",
   description:
     "AI legal research for the Republic of Uzbekistan. Citation-grounded answers in Uzbek, Russian and English.",
 };

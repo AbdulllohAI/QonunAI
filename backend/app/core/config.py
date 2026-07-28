@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     )
 
     # ---------------------------------------------------------------- app
-    APP_NAME: str = "HuquqAI"
+    APP_NAME: str = "QonunAI"
     ENV: Literal["dev", "staging", "prod"] = "dev"
     DEBUG: bool = False
     API_V1_PREFIX: str = "/api/v1"
@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     NORMA_BASE_URL: str = "https://norma.uz"
     GOV_OPENDATA_BASE: str = "https://data.egov.uz/apiPartner"
     GOV_OPENDATA_TOKEN: str | None = None
-    INGEST_USER_AGENT: str = "HuquqAI/1.0 (+legal-research; contact: admin@example.uz)"
+    INGEST_USER_AGENT: str = "QonunAI/1.0 (+legal-research; contact: admin@example.uz)"
     INGEST_CONCURRENCY: int = 4
     INGEST_RATE_LIMIT_RPS: float = 2.0
     INGEST_MAX_RETRIES: int = 5
