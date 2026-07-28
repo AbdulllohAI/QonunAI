@@ -122,6 +122,10 @@ class HybridRetriever:
 
         candidates = pinned + [c for c in fused if c.chunk_id not in {p.chunk_id for p in pinned}]
         candidates = self._dedupe_by_article(candidates)
+        # Already sorted best-first (pinned exact matches, then descending
+        # fused_score) — capping here only drops candidates RRF itself ranked
+        # lowest, before paying the cross-encoder's per-candidate cost on them.
+        candidates = candidates[: settings.RERANK_CANDIDATE_CAP]
 
         reranked = await reranker.rerank(query, candidates, top_k)
         reranked = [c for c in reranked if c.score >= settings.MIN_RELEVANCE_SCORE] or reranked[:3]

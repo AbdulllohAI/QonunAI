@@ -335,8 +335,13 @@ class ReasoningEngine:
                 refusal_reason=validation.reason,
             )
 
+        # The model's own inline "Risk level: X" line can under-state what
+        # assess() just decided (it takes the higher of the two) — rewrite it
+        # so the answer body never contradicts the risk badge shown next to it.
+        answer_text = risk_mod.rewrite_stated_risk(validation.text, assessment.level)
+
         return LegalAnswer(
-            answer=validation.text,
+            answer=answer_text,
             citations=validator_mod.used_source_dicts(validation, context.sources),
             risk=assessment.to_dict(),
             hierarchy=analysis.to_dict(),

@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     RETRIEVAL_TOP_K_SPARSE: int = 40
     RETRIEVAL_TOP_K_FINAL: int = 12
     RRF_K: int = 60
+    # Fusion sees the full dense+sparse pool (up to 80 candidates) so RRF has
+    # real breadth to rank over, but the cross-encoder reranker is by far the
+    # most expensive step on CPU (a forward pass per candidate) — capping how
+    # many of the *already RRF-ranked* candidates it has to score bounds that
+    # cost without touching recall, since the ones cut were the fusion's own
+    # lowest-ranked guesses.
+    RERANK_CANDIDATE_CAP: int = 30
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     RERANKER_ENABLED: bool = True
     MIN_RELEVANCE_SCORE: float = 0.25

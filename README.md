@@ -10,7 +10,7 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2015-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-73%20passing-2ea44f)](backend/tests/test_units.py)
+[![Tests](https://img.shields.io/badge/tests-76%20passing-2ea44f)](backend/tests/test_units.py)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -179,7 +179,7 @@ Full instructions, including crawling lex.uz directly: [`docs/DEPLOYMENT.md`](do
 cd backend && pytest tests/ -v
 ```
 
-73 unit tests, no database or network required — verified passing. They cover
+76 unit tests, no database or network required — verified passing. They cover
 the places where a silent regression is most damaging: transliteration (halves
 Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
 validation (hallucinations reaching users), and the hierarchy-of-force rules

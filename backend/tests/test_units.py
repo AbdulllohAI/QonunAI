@@ -541,6 +541,26 @@ def test_parse_stated_risk_multilingual():
     assert risk_mod.parse_stated_risk("Xavf darajasi: YUQORI") is risk_mod.RiskLevel.HIGH
 
 
+def test_rewrite_stated_risk_escalates_the_visible_label():
+    # Body says MEDIUM; escalate it to HIGH so it never contradicts a badge
+    # that reflects the reconciled (higher) level.
+    answer = "Xulosa [S1]. Xavf darajasi: MEDIUM — asoslash."
+    rewritten = risk_mod.rewrite_stated_risk(answer, risk_mod.RiskLevel.HIGH)
+    assert "Xavf darajasi: HIGH" in rewritten
+    assert "MEDIUM" not in rewritten
+
+
+def test_rewrite_stated_risk_preserves_surrounding_text():
+    answer = "Javob [S1]. Уровень риска: НИЗКИЙ — bir gap."
+    rewritten = risk_mod.rewrite_stated_risk(answer, risk_mod.RiskLevel.LOW)
+    assert rewritten == "Javob [S1]. Уровень риска: LOW — bir gap."
+
+
+def test_rewrite_stated_risk_is_a_noop_without_a_stated_line():
+    answer = "Javob faqat matn, hech qanday risk yorlig'isiz [S1]."
+    assert risk_mod.rewrite_stated_risk(answer, risk_mod.RiskLevel.HIGH) == answer
+
+
 # --------------------------------------------------------- context builder
 
 

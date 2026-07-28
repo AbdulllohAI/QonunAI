@@ -86,6 +86,26 @@ def parse_stated_risk(answer: str) -> RiskLevel | None:
     return _STATED_MAP.get(match.group(1).lower())
 
 
+def rewrite_stated_risk(answer: str, final: RiskLevel) -> str:
+    """Rewrite the model's own inline risk-level token to the final, reconciled
+    level, so the answer body and the risk badge never visibly disagree.
+
+    `assess()` takes the *higher* of the model's self-reported level and the
+    rule-based one — correct policy, but left unapplied it produces a body
+    that still reads "Risk level: MEDIUM" under a badge that says HIGH: the
+    same answer contradicting itself. The system prompt fixes the label to
+    the literal English tokens LOW/MEDIUM/HIGH regardless of answer language,
+    so only that token needs replacing — the surrounding label word and
+    justification sentence (already in the answer's own language) are left
+    untouched.
+    """
+    match = _STATED_RE.search(answer)
+    if not match:
+        return answer
+    start, end = match.span(1)
+    return answer[:start] + final.value.upper() + answer[end:]
+
+
 def assess(
     *,
     question: str,
