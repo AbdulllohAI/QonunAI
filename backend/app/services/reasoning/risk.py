@@ -66,7 +66,18 @@ class RiskAssessment:
 
 
 _STATED_RE = re.compile(
-    r"(?:risk\s*level|xavf\s*darajasi|хавф\s*даражаси|уровень\s*риска)\s*[:\-–]?\s*\**\s*"
+    r"(?:risk\s*level|xavf\s*darajasi|хавф\s*даражаси|уровень\s*риска)"
+    # Everything between the label and the value is noise to skip over, not
+    # structure to model: a colon or dash, whitespace/newlines, and markdown
+    # emphasis chars — which can show up as ONE run ("**Label** HIGH") or as
+    # TWO separate runs closing the label and opening the value's own span
+    # ("**Label**\n\n`HIGH`", "**Label**\n\n**HIGH**") depending on how the
+    # model chose to format it. A single `\**` only ever matched the first
+    # run and silently failed the second, which meant a stated line in that
+    # (common, model-preferred) style went undetected — read as "absent" and
+    # given a second, duplicate section by ensure_stated_risk right under a
+    # real one it never actually failed to write.
+    r"[\s`*:\-–]*"
     r"(LOW|MEDIUM|HIGH|PAST|OʻRTA|O‘RTA|ORTA|YUQORI|НИЗКИЙ|СРЕДНИЙ|ВЫСОКИЙ|ПАСТ|ЎРТА|ЮҚОРИ)",
     re.IGNORECASE,
 )

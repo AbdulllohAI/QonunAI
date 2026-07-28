@@ -564,6 +564,27 @@ def test_parse_stated_risk_multilingual():
     assert risk_mod.parse_stated_risk("Xavf darajasi: YUQORI") is risk_mod.RiskLevel.HIGH
 
 
+def test_parse_stated_risk_handles_separately_wrapped_label_and_value():
+    """Regression: the model's actual preferred style closes the label's own
+    bold span before opening a new one (or a backtick span) for the value,
+    e.g. "**Xavf darajasi**\\n\\n`LOW`" or "**Xavf darajasi**\\n\\n**HIGH**".
+    A regex that only skips one contiguous run of wrapper characters misses
+    this and reads the line as absent — which used to make ensure_stated_risk
+    append a second, duplicate section right under a real one."""
+    assert risk_mod.parse_stated_risk("**Xavf darajasi**\n\n`LOW` — sabab.") is risk_mod.RiskLevel.LOW
+    assert risk_mod.parse_stated_risk("**Xavf darajasi**\n\n**HIGH** — sabab.") is risk_mod.RiskLevel.HIGH
+    assert risk_mod.parse_stated_risk("**Risk level**\n`MEDIUM`") is risk_mod.RiskLevel.MEDIUM
+
+
+def test_ensure_stated_risk_does_not_duplicate_a_separately_wrapped_line():
+    answer = "Javob [S1].\n\n**Xavf darajasi**\n\n`MEDIUM` — sabab.\n\n**Manbalar**\n* [S1] ..."
+    assessment = risk_mod.RiskAssessment(level=risk_mod.RiskLevel.HIGH, factors=["x"])
+    result = risk_mod.ensure_stated_risk(answer, assessment, Language.UZ_LATN)
+    assert result.lower().count("xavf darajasi") == 1
+    assert "`HIGH`" in result or "HIGH`" in result
+    assert "MEDIUM" not in result
+
+
 def test_rewrite_stated_risk_escalates_the_visible_label():
     # Body says MEDIUM; escalate it to HIGH so it never contradicts a badge
     # that reflects the reconciled (higher) level.
