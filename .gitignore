@@ -1,0 +1,22 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# node
+node_modules/
+.next/
+*.tsbuildinfo
+
+# secrets & data
+.env
+backend/data/
+!backend/data/.gitkeep
+
+# models
+models/
+
+# local dev-tool config (Claude Code preview launch config, not project source)
+.claude/

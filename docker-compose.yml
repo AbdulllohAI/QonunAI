@@ -1,0 +1,168 @@
+name: uzlex-ai
+
+x-backend-env: &backend-env
+  POSTGRES_DSN: postgresql+asyncpg://uzlex:${POSTGRES_PASSWORD:-uzlex}@postgres:5432/uzlex
+  REDIS_DSN: redis://redis:6379/0
+  SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+  ENV: ${ENV:-dev}
+  DEBUG: ${DEBUG:-false}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+  LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5}
+  ANTHROPIC_EFFORT: ${ANTHROPIC_EFFORT:-high}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1:8b-instruct-q4_K_M}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-3000}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+  EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-cpu}
+  VECTOR_BACKEND: ${VECTOR_BACKEND:-pgvector}
+  GOV_OPENDATA_TOKEN: ${GOV_OPENDATA_TOKEN:-}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: uzlex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-uzlex}
+      POSTGRES_DB: uzlex
+      # C collation keeps Cyrillic/Latin sort order predictable across hosts.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U uzlex -d uzlex"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      args:
+        PREFETCH_MODELS: "true"
+    environment: *backend-env
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/data:/app/data
+      - models:/models
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+    environment: *backend-env
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/data:/app/data
+      - models:/models
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    # concurrency=2: each worker loads the embedding model into RAM (~2.5 GB).
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=info --concurrency=2
+    # The image's baked-in HEALTHCHECK curls the API on :8000, which nothing in
+    # this container listens on — override with a Celery-native check instead.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app.celery_app inspect ping -t 5 | grep -q OK"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: ./backend
+    environment: *backend-env
+    volumes:
+      - ./backend/app:/app/app
+      - models:/models
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: celery -A app.workers.celery_app.celery_app beat --loglevel=info
+    # Same override as worker: the image HEALTHCHECK doesn't apply here either.
+    # Beat is a scheduler with no ping RPC of its own, so the check confirms
+    # only that the process is alive, not that it's actively scheduling.
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # Optional local-LLM profile: `docker compose --profile local-llm up`
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    profiles: ["prod"]
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  models:
+  ollama:
