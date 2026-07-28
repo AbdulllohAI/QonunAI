@@ -28,9 +28,11 @@ from app.services.reasoning import risk as risk_mod
 from app.services.reasoning import validator as validator_mod
 from app.services.reasoning.prompts import (
     DISCLAIMER_BY_LANG,
+    GREETING_RESPONSES,
     NO_CONTEXT_MESSAGES,
     build_system_prompt,
     context_message,
+    is_greeting,
 )
 
 log = get_logger(__name__)
@@ -125,6 +127,33 @@ class ReasoningEngine:
             refusal_reason="no_context",
         )
 
+    def _greeting_answer(self, lang: Language, mode: str, started: float) -> LegalAnswer:
+        """Short-circuit before retrieval even runs.
+
+        Retrieval's own top-3 fallback (for when nothing clears the relevance
+        threshold — meant to rescue a genuine question with merely imprecise
+        embeddings) can't tell "weakly relevant" apart from "not a legal
+        question at all." Left unguarded, a bare "salom" fed the model 3
+        essentially-random chunks and it built a confident, fully-cited HIGH
+        risk answer out of them — observed producing an answer about criminal
+        liability for religious extremism in response to "hello." Catching
+        this before retrieval is both correct and free: no wasted retrieval
+        pass, no LLM call, no fabrication risk to guard against after the
+        fact.
+        """
+        return LegalAnswer(
+            answer=GREETING_RESPONSES[lang],
+            disclaimer=DISCLAIMER_BY_LANG[lang],
+            language=lang.value,
+            mode=mode,
+            risk=risk_mod.RiskAssessment(
+                level=risk_mod.RiskLevel.LOW,
+                factors=["Greeting — no legal question was asked."],
+            ).to_dict(),
+            total_ms=int((time.perf_counter() - started) * 1000),
+            answered=True,
+        )
+
     # ------------------------------------------------------------------ answer
     async def answer(
         self,
@@ -141,12 +170,16 @@ class ReasoningEngine:
         document_text: str | None = None,
     ) -> LegalAnswer:
         started = time.perf_counter()
+        lang = language or detect_language(question)
+        if not document_text and is_greeting(question):
+            return self._greeting_answer(lang, mode, started)
+
         retrieval_query = _retrieval_query(question, document_text)
         lang, retrieval, context = await self._prepare(
             session,
             retrieval_query,
             mode=mode,
-            language=language,
+            language=lang,
             act_types=act_types,
             act_ids=act_ids,
             top_k=top_k,
@@ -215,11 +248,23 @@ class ReasoningEngine:
         document_text: str | None = None,
     ) -> AsyncIterator[dict]:
         started = time.perf_counter()
+        lang = language or detect_language(question)
+        if not document_text and is_greeting(question):
+            # "meta" was already sent by the caller before stream() was
+            # invoked (see chat.py) — the contract from here on is
+            # sources -> delta -> done, same as the retrieval path below,
+            # just with an empty sources list since none were fetched.
+            result = self._greeting_answer(lang, mode, started)
+            yield {"type": "sources", "sources": [], "retrieval_ms": 0, "language": lang.value}
+            yield {"type": "delta", "text": result.answer}
+            yield {"type": "done", "result": result.to_dict()}
+            return
+
         lang, retrieval, context = await self._prepare(
             session,
             _retrieval_query(question, document_text),
             mode=mode,
-            language=language,
+            language=lang,
             act_types=act_types,
             act_ids=act_ids,
             top_k=None,

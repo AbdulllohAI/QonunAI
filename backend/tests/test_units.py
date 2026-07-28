@@ -27,6 +27,7 @@ from app.services.rag.crossref import extract_references
 from app.services.rag.keyword import extract_article_numbers, infer_act_types
 from app.services.rag.types import RetrievedChunk
 from app.services.reasoning import hierarchy as hierarchy_mod
+from app.services.reasoning import prompts as prompts_mod
 from app.services.reasoning import risk as risk_mod
 from app.services.reasoning import validator as validator_mod
 
@@ -635,6 +636,40 @@ def test_ensure_stated_risk_localises_the_label_per_language():
 def test_rewrite_stated_risk_is_a_noop_without_a_stated_line():
     answer = "Javob faqat matn, hech qanday risk yorlig'isiz [S1]."
     assert risk_mod.rewrite_stated_risk(answer, risk_mod.RiskLevel.HIGH) == answer
+
+
+# ------------------------------------------------------- greeting detection
+
+
+def test_bare_greetings_are_detected():
+    """Regression: a bare "salom" reached full retrieval + generation, and
+    the model built a confident, fully-cited HIGH-risk answer out of 3
+    essentially-random chunks (retrieval's top-3 fallback doesn't
+    distinguish "weakly relevant" from "not a legal question at all") —
+    observed producing an answer about criminal liability for religious
+    extremism in response to "hello"."""
+    for greeting in [
+        "salom", "Salom!", "assalomu alaykum", "Assalomu alaykum!",
+        "привет", "Здравствуйте", "hi", "Hello", "hey", "rahmat", "спасибо",
+        "salom.", "  salom  ", "OK", "test",
+    ]:
+        assert prompts_mod.is_greeting(greeting), f"expected a greeting: {greeting!r}"
+
+
+def test_real_questions_are_not_treated_as_greetings():
+    for question in [
+        "Salom, mehnat huquqi bo'yicha savolim bor",
+        "Shartnoma qanday shaklda tuziladi?",
+        "733-modda nima haqida?",
+        "Привет, у меня вопрос про трудовой договор",
+        "hi, what is the penalty for theft?",
+    ]:
+        assert not prompts_mod.is_greeting(question), f"should not be a greeting: {question!r}"
+
+
+def test_greeting_responses_cover_every_supported_language():
+    for lang in Language:
+        assert lang in prompts_mod.GREETING_RESPONSES
 
 
 # --------------------------------------------------------- context builder

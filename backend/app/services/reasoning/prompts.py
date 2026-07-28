@@ -6,7 +6,54 @@ question go in the message turns, after the cache breakpoint, never in here.
 """
 from __future__ import annotations
 
+import re
+
 from app.db.models import Language
+
+# Matches only when the ENTIRE trimmed message is a bare greeting/pleasantry —
+# "Salom, mehnat huquqi bo'yicha savolim bor" still falls through to real
+# retrieval. Exists because a bare "salom" was otherwise treated exactly like
+# any other query: retrieval's own top-3 fallback (for when nothing clears
+# the relevance threshold — meant to rescue a genuine question with merely
+# imprecise embeddings) doesn't distinguish "weakly relevant" from "not a
+# legal question at all," so it fed the model 3 essentially-random chunks
+# and the model dutifully built a confident, fully-cited, HIGH-risk answer
+# out of them — observed producing an answer about criminal liability for
+# religious extremism in response to "hello."
+_GREETING_RE = re.compile(
+    r"^(salom(lar)?|assalomu?\s*alaykum|привет|здравствуйте|добрый\s*(день|вечер|утро)"
+    r"|hi|hello|hey|xayrli\s*(kun|kech|tong)|rahmat|рахмат|спасибо|thanks?|thank\s*you"
+    r"|ok|okay|xop|test)[\s!.,?ʼ'ʻ‘]*$",
+    re.IGNORECASE,
+)
+
+
+def is_greeting(message: str) -> bool:
+    return bool(_GREETING_RE.match(message.strip()))
+
+
+GREETING_RESPONSES: dict[Language, str] = {
+    Language.UZ_LATN: (
+        "Assalomu alaykum! Men HuquqAI — Oʻzbekiston qonunchiligi boʻyicha AI "
+        "yordamchisiman. Menga huquqiy savolingizni bering, masalan: "
+        "\"Mehnat shartnomasi qanday shaklda tuziladi?\""
+    ),
+    Language.UZ_CYRL: (
+        "Ассалому алайкум! Мен HuquqAI — Ўзбекистон қонунчилиги бўйича AI "
+        "ёрдамчисиман. Менга ҳуқуқий саволингизни беринг, масалан: "
+        "«Меҳнат шартномаси қандай шаклда тузилади?»"
+    ),
+    Language.RU: (
+        "Здравствуйте! Я HuquqAI — ИИ-помощник по законодательству Узбекистана. "
+        "Задайте мне юридический вопрос, например: «В какой форме заключается "
+        "трудовой договор?»"
+    ),
+    Language.EN: (
+        "Hello! I'm HuquqAI, an AI assistant for the law of the Republic of "
+        "Uzbekistan. Ask me a legal question, e.g. \"What form must a labour "
+        "contract take?\""
+    ),
+}
 
 DISCLAIMER_BY_LANG: dict[Language, str] = {
     Language.UZ_LATN: (
