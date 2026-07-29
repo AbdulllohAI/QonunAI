@@ -1,6 +1,7 @@
 """FastAPI application entrypoint."""
 from __future__ import annotations
 
+import asyncio
 import time
 from contextlib import asynccontextmanager
 
@@ -36,6 +37,19 @@ async def lifespan(app: FastAPI):
             "llm_provider": settings.LLM_PROVIDER.value,
         },
     )
+    # Run migrations here instead of as a separate startCommand step, so the
+    # process binds its port immediately and migrations happen in the background
+    # of the same PID uvicorn's healthcheck is probing.
+    try:
+        from alembic import command
+        from alembic.config import Config
+
+        alembic_cfg = Config("alembic.ini")
+        await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+        log.info("migrations applied")
+    except Exception as exc:
+        log.warning("migration step failed", extra={"error": str(exc)})
+
     # Warm the embedding model so the first user query does not pay the load.
     try:
         await embedder.embed_texts(["warmup"], use_cache=False)
@@ -155,7 +169,9 @@ app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 async def health():
     database_ok = False
     corpus = {"acts": 0, "chunks": 0, "embedded_chunks": 0}
-    try:
+
+    async def _check_db() -> None:
+        nonlocal database_ok
         async with SessionLocal() as session:
             await session.execute(text("SELECT 1"))
             database_ok = True
@@ -170,15 +186,25 @@ async def health():
                     select(func.count(Chunk.id)).where(Chunk.embedding.isnot(None))
                 )
             ).scalar_one()
+
+    try:
+        await asyncio.wait_for(_check_db(), timeout=3)
     except Exception as exc:
         log.warning("database health check failed", extra={"error": str(exc)})
 
     redis_ok = False
-    try:
+
+    async def _check_redis() -> None:
+        nonlocal redis_ok
         client = aioredis.from_url(str(settings.REDIS_DSN))
-        await client.ping()
-        await client.aclose()
-        redis_ok = True
+        try:
+            await client.ping()
+            redis_ok = True
+        finally:
+            await client.aclose()
+
+    try:
+        await asyncio.wait_for(_check_redis(), timeout=3)
     except Exception as exc:
         log.warning("redis health check failed", extra={"error": str(exc)})
 
