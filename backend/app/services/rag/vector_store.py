@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import VectorBackend, settings
 from app.core.logging import get_logger
 from app.db.models import ActStatus, ActType, Chunk, LegalAct, Language
+from app.services.ingestion.anchors import build_deep_link
 from app.services.rag.types import RetrievedChunk
 
 log = get_logger(__name__)
@@ -39,7 +40,7 @@ def _row_to_chunk(chunk: Chunk, act: LegalAct, distance: float) -> RetrievedChun
         jurisdiction=chunk.jurisdiction,
         date_of_adoption=chunk.date_of_adoption,
         last_updated=chunk.last_updated,
-        source_url=chunk.source_url or act.source_url,
+        source_url=build_deep_link(chunk.source_url or act.source_url, chunk.lexuz_anchor_id),
         dense_score=similarity,
     )
 

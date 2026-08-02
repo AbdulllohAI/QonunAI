@@ -31,6 +31,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.models import ActType, Chunk, Language, LegalAct
 from app.db.session import SessionLocal
+from app.services.ingestion.anchors import build_deep_link
 from app.services.lang.detect import detect_language, target_search_languages
 from app.services.rag.crossref import expand_cross_references
 from app.services.rag.embedder import embedder
@@ -60,7 +61,7 @@ def _to_retrieved(chunk: Chunk, act: LegalAct, *, sparse: float = 0.0) -> Retrie
         jurisdiction=chunk.jurisdiction,
         date_of_adoption=chunk.date_of_adoption,
         last_updated=chunk.last_updated,
-        source_url=chunk.source_url or act.source_url,
+        source_url=build_deep_link(chunk.source_url or act.source_url, chunk.lexuz_anchor_id),
         sparse_score=sparse,
     )
 

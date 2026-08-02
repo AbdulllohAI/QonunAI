@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.models import ActStatus, Chunk, CrossReference, Language, LegalAct, RefKind
+from app.services.ingestion.anchors import build_deep_link
 from app.services.rag.types import RetrievedChunk
 
 log = get_logger(__name__)
@@ -191,7 +192,7 @@ async def expand_cross_references(
                 heading=chunk.heading,
                 date_of_adoption=chunk.date_of_adoption,
                 last_updated=chunk.last_updated,
-                source_url=chunk.source_url or act.source_url,
+                source_url=build_deep_link(chunk.source_url or act.source_url, chunk.lexuz_anchor_id),
                 fused_score=0.3,
                 via_crossref_from=wanted[key],
             )

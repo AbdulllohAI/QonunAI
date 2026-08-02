@@ -263,6 +263,14 @@ class LegalNode(Base):
     body: Mapped[str | None] = mapped_column(Text)
     language: Mapped[Language] = mapped_column(_pg_enum(Language, "language"))
 
+    lexuz_anchor_id: Mapped[str | None] = mapped_column(String(32))
+    """lex.uz node id — the URL fragment that scrolls to this article."""
+
+    anchor_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    """True once the anchor was confirmed to match an element in the source HTML."""
+
+    anchor_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     meta: Mapped[dict] = mapped_column(JSONB, default=dict)
 
     act: Mapped[LegalAct] = relationship(back_populates="nodes")
@@ -365,6 +373,9 @@ class Chunk(Base):
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
 
     source_url: Mapped[str | None] = mapped_column(Text)
+    lexuz_anchor_id: Mapped[str | None] = mapped_column(String(32))
+    """Denormalised from the owning node so citations need no join."""
+
     embedding: Mapped[list[float] | None] = mapped_column(Vector(settings.EMBEDDING_DIM))
     search_vector: Mapped[str | None] = mapped_column(TSVECTOR)
 
@@ -555,3 +566,76 @@ class AlertSubscription(Base):
     keyword: Mapped[str | None] = mapped_column(String(255))
     channel: Mapped[str] = mapped_column(String(32), default="in_app")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ------------------------------------------------------------------- memory
+
+
+class UserProfile(Base):
+    """Structured per-user profile: style preferences and topic history.
+
+    One row per authenticated user, upserted on every answered query.
+    Anonymous sessions have no profile — memory is auth-gated.
+    """
+
+    __tablename__ = "user_profiles"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
+    )
+
+    preferred_style: Mapped[str] = mapped_column(String(16), default="auto")
+    """'concise' | 'detailed' | 'auto' — derived from compact-mode usage."""
+
+    topics: Mapped[list] = mapped_column(JSONB, default=list)
+    """Top legal topic keywords from past queries (capped at 20)."""
+
+    query_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_language: Mapped[str | None] = mapped_column(String(16))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SemanticMemory(Base):
+    """One compressed Q&A memory per answered query, for authenticated users.
+
+    The embedding is of the *question* so similarity search finds relevant
+    past contexts when a new question arrives. The answer summary is injected
+    into the prompt to give the model background the user already understands.
+    """
+
+    __tablename__ = "semantic_memories"
+    __table_args__ = (
+        Index("ix_smem_user_weight", "user_id", "weight"),
+        Index(
+            "ix_smem_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+
+    question: Mapped[str] = mapped_column(Text)
+    answer_summary: Mapped[str] = mapped_column(Text)
+    language: Mapped[str] = mapped_column(String(16), default="uz-Latn")
+
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(settings.EMBEDDING_DIM))
+
+    weight: Mapped[float] = mapped_column(Float, default=1.0)
+    """Starts at 1.0 and decays ~5% per week. Memories below 0.1 are ignored."""
+
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_accessed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
