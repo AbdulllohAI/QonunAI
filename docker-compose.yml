@@ -73,6 +73,10 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/data:/app/data
+      # Migrations must be mounted too: without this a container recreate
+      # ships an image whose alembic/versions predates the DB's current
+      # revision, and startup dies with "Can't locate revision <id>".
+      - ./backend/alembic/versions:/app/alembic/versions
       - models:/models
     ports:
       - "${BACKEND_PORT:-8000}:8000"
@@ -112,6 +116,10 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/data:/app/data
+      # Migrations must be mounted too: without this a container recreate
+      # ships an image whose alembic/versions predates the DB's current
+      # revision, and startup dies with "Can't locate revision <id>".
+      - ./backend/alembic/versions:/app/alembic/versions
       - models:/models
     depends_on:
       backend:

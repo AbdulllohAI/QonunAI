@@ -6,11 +6,13 @@
 
 Every legal claim resolves to a real `[Sn]` source tag. Citations to articles that were never retrieved get stripped before they reach the user, not just flagged — see [How the anti-hallucination guarantee actually works](#-how-the-anti-hallucination-guarantee-actually-works).
 
+**[→ Try the live app](https://ai-frontend-ten-roan.vercel.app)**  ·  [API](https://uzlex-ai.fly.dev/docs)  ·  [Health & corpus status](https://uzlex-ai.fly.dev/health)
+
 [![Python](https://img.shields.io/badge/Python-3.12-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2015-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-86%20passing-2ea44f)](backend/tests/test_units.py)
+[![Tests](https://img.shields.io/badge/tests-94%20passing-2ea44f)](backend/tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -44,6 +46,7 @@ generic "looks fine to me."
 | | |
 |---|---|
 | 📌 **Citation-grounded Q&A** | Every legal statement carries an `[Sn]` tag resolving to a specific article. Uncited or unverifiable answers are rejected, not softened. |
+| 🔗 **Article-level deep links** | Citations open the *provision*, not the top of a 4 MB document — `lex.uz/docs/6257288#6259020` lands directly on 80-modda. See [Deep linking into lex.uz](#-deep-linking-into-lexuz). |
 | 🔍 **Hybrid retrieval** | Dense (`bge-m3` + pgvector HNSW) + sparse (per-language Postgres FTS) + exact-article lookup, fused and cross-encoder reranked. |
 | ⚖️ **Legal hierarchy reasoning** | Constitution > Codes > Laws > Decrees, then *lex specialis*, then *lex posterior* — computed deterministically from adoption dates and act type, not left to the model to reason about on the fly. |
 | 🔗 **Cross-reference expansion** | "…in the cases provided for by Article 333 of this Code" automatically pulls Article 333 into context. |
@@ -57,7 +60,7 @@ generic "looks fine to me."
 - **Backend:** FastAPI, SQLAlchemy 2 (async), Alembic, Celery + Redis (ingestion, corpus stats, connector health checks)
 - **Retrieval:** PostgreSQL 16 + pgvector (HNSW cosine), `BAAI/bge-m3` multilingual embeddings, Postgres full-text search, `BAAI/bge-reranker-v2-m3` cross-encoder
 - **LLM layer:** a thin provider router — Anthropic, OpenAI-compatible (Groq / Gemini / vLLM / Together), or local Ollama, selectable globally or per-request
-- **Frontend:** Next.js 15, React 19, TypeScript, Tailwind
+- **Frontend:** Next.js 16 (App Router), React 19, TypeScript (strict), Tailwind — token-streamed SSE chat with markdown rendering and deep-linked citation cards
 - **Ingestion:** rate-limited, robots-aware connectors for lex.uz / norma.uz / data.egov.uz, with HTML/PDF+OCR/DOCX parsing and a hierarchy builder (Qism → Bo'lim → Bob → Modda → Band)
 
 ## 🔁 How it works — architecture
@@ -129,6 +132,44 @@ enforced mechanically, not just requested:
    swaps it in — so a stripped citation never stays on screen, even for the
    tokens that streamed before validation ran.
 
+## 🔗 Deep linking into lex.uz
+
+A citation that opens a four-megabyte document and leaves you to scroll isn't a
+citation. QonunAI links straight to the article — and getting there required
+working out how lex.uz actually addresses provisions, because it isn't documented.
+
+There is no `#article80` anchor. Every structural node has a stable numeric id,
+surfaced in the table of contents as `scrollText('6259020')`. That handler does
+`history.pushState(null, '', '#' + hash)`, a matching element carries
+`id`/`name` with that value, and `window.onload` re-reads the hash — so a
+pasted link scrolls correctly on a cold load. The canonical form is therefore:
+
+```
+https://lex.uz/docs/6257288#6259020   → 80-modda
+```
+
+Two things make naive extraction wrong, both found by measuring rather than assuming:
+
+- **Sub-numbered articles.** lex.uz renders article 57¹ as the literal text
+  `Статья 57 1 .` — space-separated digits, not a superscript entity. Parsing
+  only the leading number collapses 57, 57¹ and 57² into one key. They are
+  legally distinct provisions, so they're normalised to `57`, `57-1`, `57-2`.
+- **The corpus had already collapsed them.** `chunks.article_number` holds no
+  separators, so all three were stored as `"57"`. Matching an anchor on article
+  number alone would mis-link two of every three. Disambiguation runs on the
+  heading, and returns nothing rather than guessing — a document-level link is
+  acceptable; a link to the wrong article is not.
+
+Measured: **581/581** articles resolved on the Labour Code (uz-Cyrl) and
+**404/404** on the Criminal Code (ru). Backfilled across all 13 indexed acts,
+**84.2%** of chunks (9,710/11,538) carry an anchor; the rest are chunks with no
+article number, or genuinely ambiguous ones, and degrade to document links.
+
+```bash
+# Honours lex.uz's published Crawl-delay of 20s — do not parallelise.
+docker compose exec backend python -m app.workers.backfill_anchors --dry-run
+```
+
 ## Setup
 
 ### Requirements
@@ -162,6 +203,35 @@ Full instructions, including crawling lex.uz directly: [`docs/DEPLOYMENT.md`](do
 > restart backend` picks up code changes. `.env` changes need a recreate:
 > `docker compose up -d backend`.
 
+## 🚀 Production deployment
+
+The live instance runs split across two providers:
+
+| Component | Host | Notes |
+|---|---|---|
+| Frontend | Vercel | Next.js 16, streams SSE from the API |
+| API | Fly.io (`fra`) | FastAPI, `shared-cpu-4x` / 2 GB |
+| Postgres + pgvector | Fly.io | 3 GB volume, private networking only |
+| Redis | Fly.io | Rate limits and cache, private networking only |
+
+Neither datastore is publicly reachable — the API talks to them over Fly's
+private network, and the schema is migrated through a temporary
+`flyctl proxy` tunnel rather than an exposed port.
+
+```bash
+cd backend && flyctl deploy --now
+```
+
+**Measured end-to-end on the live instance** (Labour Code question,
+uz-Latn): retrieval **346 ms**, LLM generation **11,090 ms**, total
+**12.7 s**. Generation is 87% of wall-clock — retrieval is not the
+bottleneck, so optimisation effort belongs in prompt caching, context size,
+and time-to-first-token rather than in the retriever.
+
+> Machines are configured to scale to zero (`min_machines_running = 0`), so
+> the first request after an idle period pays a cold start that includes
+> loading the embedding model. Set it to `1` before a demo.
+
 ## API surface
 
 | Endpoint | Purpose |
@@ -184,11 +254,12 @@ Full instructions, including crawling lex.uz directly: [`docs/DEPLOYMENT.md`](do
 cd backend && pytest tests/ -v
 ```
 
-86 unit tests, no database or network required — verified passing. They cover
+94 unit tests, no database or network required — verified passing. They cover
 the places where a silent regression is most damaging: transliteration (halves
 Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
-validation (hallucinations reaching users), and the hierarchy-of-force rules
-(wrong legal conclusions).
+validation (hallucinations reaching users), the hierarchy-of-force rules
+(wrong legal conclusions), and anchor extraction (citations that open the
+wrong article).
 
 ## What's been verified against the real running app
 
@@ -215,9 +286,10 @@ Being direct about these rather than glossing over them:
   question on those topics correctly says the retrieved sources don't cover
   it rather than guessing, but there's no real answer behind that honesty
   yet — load more acts via the ingestion connectors to close the gap.
-- **CPU-only embedding and reranking is slow.** A query that retrieves
-  against the full corpus (rather than a narrower, act-type-filtered one) can
-  take 1–3 minutes end to end on CPU alone. `EMBEDDING_DEVICE=cuda` fixes
+- **Answer latency is dominated by the LLM, not retrieval.** On the live
+  Fly.io instance retrieval takes **346 ms** while generation takes **11.1 s**
+  — 87% of the 12.7 s round trip. Local CPU-only runs can be far slower still
+  (1–3 minutes against the full unfiltered corpus). `EMBEDDING_DEVICE=cuda` fixes
   this if a GPU is available — verified on an RTX 4050 (6 GB): retrieval
   dropped from 56–100s to **~11s**, roughly a 5–9x speedup, with the
   embedder and reranker actually saturating the GPU at ~100% utilization
@@ -242,6 +314,24 @@ Being direct about these rather than glossing over them:
   zero results on any query that happened to contain it. That specific hint
   has been removed; the remaining ones are all precise multi-word or
   Code-specific patterns, deliberately chosen not to fire on ordinary usage.
+- **Sub-numbered articles are collapsed at ingestion.** `chunks.article_number`
+  stores no separators, so articles 57, 57¹ and 57² all land as `"57"` —
+  legally distinct provisions sharing one identifier, distinguishable only by
+  heading. Deep linking works around this by disambiguating on the heading, but
+  the underlying citation ambiguity is real and predates that work. Fixing the
+  parser would raise anchor coverage above 84.2% and remove the ambiguity at
+  source.
+- **Full-corpus crawling is bounded by politeness, not engineering.**
+  `lex.uz/robots.txt` publishes `Crawl-delay: 20`, capping one compliant
+  crawler at ~4,320 documents/day. Codes and laws are a day or two; everything
+  including historical revisions is measured in months. Parallelising to beat
+  this would violate robots.txt — the legitimate route to national-scale
+  coverage is a bulk-data agreement with the Ministry of Justice, not a faster
+  scraper.
+- **Retrieval quality is unmeasured.** There is no benchmark yet, so claims
+  about answer quality rest on spot checks rather than Recall@k or citation
+  precision. That's the single biggest gap between this and a system you'd
+  stake professional work on.
 - **Not production-hardened.** Secrets live in a plaintext `.env` (correctly
   gitignored, but not vaulted), there's no rate-limit-aware secrets rotation,
   and this hasn't been through a security review. See the ingestion caveats
