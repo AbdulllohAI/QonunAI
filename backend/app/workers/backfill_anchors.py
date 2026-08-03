@@ -45,9 +45,14 @@ async def _fetch(client: httpx.AsyncClient, url: str) -> str | None:
 
 
 async def backfill_act(
-    session, client: httpx.AsyncClient, act: LegalAct, *, dry_run: bool
+    session,
+    client: httpx.AsyncClient,
+    act: LegalAct,
+    *,
+    dry_run: bool,
+    fix_numbers: bool = False,
 ) -> dict[str, int]:
-    stats = {"chunks": 0, "matched": 0, "nodes": 0}
+    stats = {"chunks": 0, "matched": 0, "nodes": 0, "renumbered": 0}
     if not act.source_url:
         log.warning("anchor_skip_no_source_url", extra={"act": act.short_name})
         return stats
@@ -73,8 +78,15 @@ async def backfill_act(
         if hit is None:
             continue
         stats["matched"] += 1
+        # The TOC carries the sub-number the ingester dropped: articles 57, 57¹
+        # and 57² all landed as "57". `match_anchor` disambiguated them on the
+        # heading, so its article number is the corrected one.
+        if hit.article_number != chunk.article_number:
+            stats["renumbered"] += 1
         if not dry_run:
             chunk.lexuz_anchor_id = hit.anchor_id
+            if fix_numbers:
+                chunk.article_number = hit.article_number
 
     if not dry_run:
         # Mirror onto the structural nodes, which are the source of truth.
@@ -89,6 +101,8 @@ async def backfill_act(
             node.lexuz_anchor_id = hit.anchor_id
             node.anchor_verified = True
             node.anchor_checked_at = now
+            if fix_numbers:
+                node.article_number = hit.article_number
             stats["nodes"] += 1
         await session.commit()
 
@@ -100,15 +114,16 @@ async def backfill_act(
             "anchors": len(anchors),
             "chunks": stats["chunks"],
             "matched": stats["matched"],
+            "renumbered": stats["renumbered"],
             "coverage_pct": round(coverage, 1),
         },
     )
     return stats
 
 
-async def main(act_id: str | None, dry_run: bool) -> None:
+async def main(act_id: str | None, dry_run: bool, fix_numbers: bool = False) -> None:
     configure_logging("INFO")
-    totals = {"chunks": 0, "matched": 0, "nodes": 0}
+    totals = {"chunks": 0, "matched": 0, "nodes": 0, "renumbered": 0}
 
     async with SessionLocal() as session:
         stmt = select(LegalAct).order_by(LegalAct.short_name)
@@ -121,7 +136,9 @@ async def main(act_id: str | None, dry_run: bool) -> None:
                 if index:
                     # Serialised, one request per CRAWL_DELAY_SECONDS.
                     await asyncio.sleep(CRAWL_DELAY_SECONDS)
-                stats = await backfill_act(session, client, act, dry_run=dry_run)
+                stats = await backfill_act(
+                    session, client, act, dry_run=dry_run, fix_numbers=fix_numbers
+                )
                 for key in totals:
                     totals[key] += stats[key]
 
@@ -132,6 +149,7 @@ async def main(act_id: str | None, dry_run: bool) -> None:
             "acts": len(acts),
             "chunks": totals["chunks"],
             "matched": totals["matched"],
+            "renumbered": totals["renumbered"],
             "coverage_pct": round(coverage, 1),
             "dry_run": dry_run,
         },
@@ -142,5 +160,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--act-id", default=None, help="Backfill a single act.")
     parser.add_argument("--dry-run", action="store_true", help="Report without writing.")
+    parser.add_argument(
+        "--fix-numbers",
+        action="store_true",
+        help="Also correct article_number from the TOC, restoring dropped sub-numbers (57 -> 57-1).",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.act_id, args.dry_run))
+    asyncio.run(main(args.act_id, args.dry_run, args.fix_numbers))

@@ -39,6 +39,34 @@ class _Rule:
     number_group: int = 1
 
 
+#: An article number, including lex.uz's rendering of sub-numbered articles.
+#:
+#: Article 57¹ is a distinct provision from article 57 — different subject,
+#: different penalties — but lex.uz emits the superscript as a plain
+#: space-separated digit, ``Статья 57 1 .``, not an entity. Requiring a hyphen
+#: therefore captured only ``57`` for Russian, and failed to match Uzbek
+#: (``57 1 -модда``) as an article *at all*, leaving those provisions
+#: uncitable.
+#:
+#: The space-separated form only counts when followed by a delimiter, so a
+#: title beginning with a number ("Статья 15 июня…") is not mis-parsed.
+_ART_NUM = r"\d+(?:\s*[-–]\s*\d+|\s+\d+(?=\s*[-–.．]))?"
+
+_ART_NUM_SEP = re.compile(r"[\s\-–]+")
+
+
+def normalise_article_number(raw: str | None) -> str | None:
+    """Canonicalise a captured article number to ``57`` / ``57-1``.
+
+    Collapses whatever separator the source used — space, hyphen, en dash, or
+    a mix — so the same provision is one key regardless of rendering.
+    """
+    if raw is None:
+        return None
+    cleaned = _ART_NUM_SEP.sub("-", raw.strip()).strip("-")
+    return cleaned or None
+
+
 # Order matters: the most specific patterns are tried first.
 # Uzbek is written in BOTH Latin and Cyrillic, and the Cyrillic terms are
 # distinct words from the Russian ones (модда ≠ статья, боб ≠ глава). Matching
@@ -78,12 +106,12 @@ _RULES: list[_Rule] = [
     _Rule(NodeType.BOB, re.compile(r"^\s*ГЛАВА\s+([IVXLC]+|\d+)", re.I), 1),
     _Rule(NodeType.BOB, re.compile(r"^\s*CHAPTER\s+([IVXLC]+|\d+)", re.I), 1),
     # --- MODDA (Article) — the citable unit -------------------------------
-    _Rule(NodeType.MODDA, re.compile(r"^\s*(\d+(?:[-–]\d+)?)\s*[-–]?\s*MODDA\b", re.I), 1),
-    _Rule(NodeType.MODDA, re.compile(r"^\s*(\d+(?:[-–]\d+)?)\s*[-–]?\s*МОДДА\b", re.I), 1),
-    _Rule(NodeType.MODDA, re.compile(r"^\s*MODDA\s*[-–]?\s*(\d+(?:[-–]\d+)?)", re.I), 1),
-    _Rule(NodeType.MODDA, re.compile(r"^\s*МОДДА\s*[-–]?\s*(\d+(?:[-–]\d+)?)", re.I), 1),
-    _Rule(NodeType.MODDA, re.compile(r"^\s*СТАТЬЯ\s*(\d+(?:[-–]\d+)?)", re.I), 1),
-    _Rule(NodeType.MODDA, re.compile(r"^\s*ARTICLE\s*(\d+(?:[-–]\d+)?)", re.I), 1),
+    _Rule(NodeType.MODDA, re.compile(rf"^\s*({_ART_NUM})\s*[-–]?\s*MODDA\b", re.I), 1),
+    _Rule(NodeType.MODDA, re.compile(rf"^\s*({_ART_NUM})\s*[-–]?\s*МОДДА\b", re.I), 1),
+    _Rule(NodeType.MODDA, re.compile(rf"^\s*MODDA\s*[-–]?\s*({_ART_NUM})", re.I), 1),
+    _Rule(NodeType.MODDA, re.compile(rf"^\s*МОДДА\s*[-–]?\s*({_ART_NUM})", re.I), 1),
+    _Rule(NodeType.MODDA, re.compile(rf"^\s*СТАТЬЯ\s*({_ART_NUM})", re.I), 1),
+    _Rule(NodeType.MODDA, re.compile(rf"^\s*ARTICLE\s*({_ART_NUM})", re.I), 1),
     # --- BAND (Clause) ----------------------------------------------------
     _Rule(NodeType.BAND, re.compile(r"^\s*(\d+)\s*\)\s+"), 1),
     _Rule(NodeType.BAND, re.compile(r"^\s*(\d+)\.\s+(?=[A-ZА-ЯЎҚҒҲ«\"])"), 1),
@@ -201,7 +229,7 @@ class HierarchyBuilder:
 
             # Denormalise the governing article number down the subtree.
             if node_type is NodeType.MODDA:
-                node.article_number = number or None
+                node.article_number = normalise_article_number(number)
             elif parent is not None:
                 node.article_number = parent.article_number
 
