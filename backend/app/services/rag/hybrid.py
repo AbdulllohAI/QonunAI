@@ -33,6 +33,7 @@ from app.db.models import ActType, Chunk, Language, LegalAct
 from app.db.session import SessionLocal
 from app.services.ingestion.anchors import build_deep_link
 from app.services.lang.detect import detect_language, target_search_languages
+from app.services.rag.query_prep import strip_framing
 from app.services.rag.crossref import expand_cross_references
 from app.services.rag.embedder import embedder
 from app.services.rag.keyword import (
@@ -45,6 +46,13 @@ from app.services.rag.types import RetrievalResult, RetrievedChunk
 from app.services.rag.vector_store import vector_store
 
 log = get_logger(__name__)
+
+#: How much an article-title match counts for in RRF, relative to the dense and
+#: sparse lists at 1.0. Set from benchmark measurement, not intuition: title
+#: matches were the missing signal in nearly every observed failure, but pushing
+#: this much higher starts promoting articles whose title shares a common word
+#: with the question and whose body is irrelevant.
+HEADING_RRF_WEIGHT = 2.0
 
 
 def _to_retrieved(chunk: Chunk, act: LegalAct, *, sparse: float = 0.0) -> RetrievedChunk:
@@ -107,15 +115,19 @@ class HybridRetriever:
         exact_task = self._run_isolated_exact(
             article_numbers, inferred_types or None, act_ids, search_langs
         )
+        heading_task = self._run_isolated(
+            self._heading, query, lang, search_langs, inferred_types or None, act_ids, in_force_only
+        )
 
-        dense_hits, sparse_hits, exact_hits = await asyncio.gather(
-            dense_task, sparse_task, exact_task, return_exceptions=True
+        dense_hits, sparse_hits, exact_hits, heading_hits = await asyncio.gather(
+            dense_task, sparse_task, exact_task, heading_task, return_exceptions=True
         )
         dense_hits = _unwrap(dense_hits, "dense")
         sparse_hits = _unwrap(sparse_hits, "sparse")
         exact_hits = _unwrap(exact_hits, "exact-article")
+        heading_hits = _unwrap(heading_hits, "heading")
 
-        fused = self._fuse(dense_hits, sparse_hits)
+        fused = self._fuse(dense_hits, sparse_hits, heading_hits)
 
         # Exact article matches are pinned to the front — if the user asked for
         # Article 54 by name, Article 54 belongs in the context regardless of
@@ -192,7 +204,11 @@ class HybridRetriever:
         act_ids: Sequence[uuid.UUID] | None,
         in_force_only: bool,
     ) -> list[RetrievedChunk]:
-        vector = await embedder.embed_query(query)
+        # Embed the query with interrogative scaffolding removed. "Какое
+        # наказание предусмотрено за похищение человека?" otherwise embeds
+        # toward the sentencing chapter rather than the offence itself.
+        lang_value = languages[0].value if languages else "en"
+        vector = await embedder.embed_query(strip_framing(query, lang_value))
         return await vector_store.search(
             session,
             vector,
@@ -225,12 +241,43 @@ class HybridRetriever:
         )
         return [_to_retrieved(c, a, sparse=score) for c, a, score in rows]
 
+    async def _heading(
+        self,
+        session: AsyncSession,
+        query: str,
+        language: Language,
+        languages: Sequence[Language],
+        act_types: Sequence[ActType] | None,
+        act_ids: Sequence[uuid.UUID] | None,
+        in_force_only: bool,
+    ) -> list[RetrievedChunk]:
+        """Articles whose own title matches the question."""
+        rows = await keyword_searcher.by_heading(
+            session,
+            query,
+            top_k=settings.RETRIEVAL_TOP_K_SPARSE,
+            language=language,
+            languages=languages,
+            act_types=act_types,
+            act_ids=act_ids,
+            in_force_only=in_force_only,
+        )
+        return [_to_retrieved(c, a, sparse=score) for c, a, score in rows]
+
     # ------------------------------------------------------------------ fusion
     @staticmethod
     def _fuse(
-        dense: list[RetrievedChunk], sparse: list[RetrievedChunk]
+        dense: list[RetrievedChunk],
+        sparse: list[RetrievedChunk],
+        heading: list[RetrievedChunk] | None = None,
     ) -> list[RetrievedChunk]:
-        """Reciprocal Rank Fusion: score = Σ 1/(k + rank)."""
+        """Reciprocal Rank Fusion: score = Σ 1/(k + rank).
+
+        The heading list is weighted above the other two. An article whose own
+        title answers the question is the strongest signal available — measured
+        failures were almost entirely cases where the title matched but the
+        full-text rank buried it — and RRF alone treats all lists equally.
+        """
         k = settings.RRF_K
         merged: dict[uuid.UUID, RetrievedChunk] = {}
         scores: dict[uuid.UUID, float] = defaultdict(float)
@@ -249,6 +296,12 @@ class HybridRetriever:
                 chunk.sparse_rank = rank
                 merged[chunk.chunk_id] = chunk
             scores[chunk.chunk_id] += 1.0 / (k + rank)
+
+        for rank, chunk in enumerate(heading or [], start=1):
+            existing = merged.get(chunk.chunk_id)
+            if existing is None:
+                merged[chunk.chunk_id] = chunk
+            scores[chunk.chunk_id] += HEADING_RRF_WEIGHT / (k + rank)
 
         for chunk_id, score in scores.items():
             merged[chunk_id].fused_score = score

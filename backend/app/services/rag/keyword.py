@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.db.models import ActStatus, ActType, Chunk, LegalAct, Language
 from app.services.lang.translit import cyrillic_to_latin, normalize, script_variants
+from app.services.rag.query_prep import content_tokens, stem_variants
 
 log = get_logger(__name__)
 
@@ -95,15 +96,21 @@ def build_tsquery(query: str, language: Language) -> tuple[str, str]:
     exact-token query misses "shartnomani" when the user typed "shartnoma".
     """
     config = language.pg_text_config
+    # Postgres stems Russian and English itself; for those, adding our own
+    # truncated variants would only add noise. Uzbek uses 'simple' (no stemmer),
+    # which is where the suffix problem lives.
+    needs_stemming = config == "simple"
+
     tokens: list[str] = []
     for variant in script_variants(query):
-        for raw in re.findall(r"[\w‘ʼ]{2,}", variant, flags=re.UNICODE):
-            token = raw.lower().replace("'", "").replace("‘", "").replace("ʼ", "")
-            if token and token not in tokens and not token.isdigit():
-                tokens.append(token)
+        for raw in content_tokens(variant, language.value):
+            forms = stem_variants(raw) if needs_stemming else [raw]
+            for token in forms:
+                if token and token not in tokens:
+                    tokens.append(token)
     if not tokens:
         tokens = [normalize(query).lower() or "x"]
-    return config, " | ".join(f"{t}:*" for t in tokens[:40])
+    return config, " | ".join(f"{t}:*" for t in tokens[:60])
 
 
 class KeywordSearcher:
@@ -137,6 +144,53 @@ class KeywordSearcher:
             # A malformed tsquery must not take the whole request down; dense
             # retrieval can still answer.
             log.warning("keyword search failed", extra={"error": str(exc), "query": query[:120]})
+            return []
+        return [(chunk, act, float(r)) for chunk, act, r in rows]
+
+    async def by_heading(
+        self,
+        session: AsyncSession,
+        query: str,
+        *,
+        top_k: int,
+        language: Language,
+        languages: Sequence[Language] | None = None,
+        act_types: Sequence[ActType] | None = None,
+        act_ids: Sequence[uuid.UUID] | None = None,
+        in_force_only: bool = True,
+    ) -> list[tuple[Chunk, LegalAct, float]]:
+        """Match the query against article titles only.
+
+        Benchmarking showed that in essentially every retrieval failure the
+        answer was sitting in the article's own title — "Меҳнат шартномасининг
+        шакли" for a question about the form of an employment contract — while
+        the full-text search buried it under hundreds of articles that merely
+        mention employment contracts.
+
+        Searching titles in isolation fixes that for two reasons: the title has
+        no body text to dilute it, and it is short, so ts_rank_cd's length
+        normalisation (flag 2 | 8) rewards a title that is *mostly* query terms
+        over a long one that happens to contain them.
+        """
+        config, tsquery = build_tsquery(query, language)
+        ts = func.to_tsquery(config, tsquery)
+        heading_tsv = func.to_tsvector(config, func.coalesce(Chunk.heading, ""))
+        # 2 = divide by document length, 8 = divide by unique word count.
+        rank = func.ts_rank_cd(heading_tsv, ts, 2 | 8).label("rank")
+
+        stmt: Select = (
+            select(Chunk, LegalAct, rank)
+            .join(LegalAct, LegalAct.id == Chunk.act_id)
+            .where(Chunk.heading.isnot(None))
+            .where(heading_tsv.op("@@")(ts))
+        )
+        stmt = self._filters(stmt, languages, act_types, act_ids, in_force_only)
+        stmt = stmt.order_by(rank.desc()).limit(top_k)
+
+        try:
+            rows = (await session.execute(stmt)).all()
+        except Exception as exc:
+            log.warning("heading search failed", extra={"error": str(exc), "query": query[:120]})
             return []
         return [(chunk, act, float(r)) for chunk, act, r in rows]
 
