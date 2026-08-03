@@ -41,6 +41,7 @@ def _row_to_chunk(chunk: Chunk, act: LegalAct, distance: float) -> RetrievedChun
         date_of_adoption=chunk.date_of_adoption,
         last_updated=chunk.last_updated,
         source_url=build_deep_link(chunk.source_url or act.source_url, chunk.lexuz_anchor_id),
+        act_status=act.status.value if act.status else None,
         dense_score=similarity,
     )
 

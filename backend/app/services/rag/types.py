@@ -25,6 +25,9 @@ class RetrievedChunk:
     date_of_adoption: date | None = None
     last_updated: date | None = None
     source_url: str | None = None
+    act_status: str | None = None
+    """Whether the act is still in force — a citation card must not imply that
+    a repealed provision is current law."""
 
     dense_score: float = 0.0
     sparse_score: float = 0.0

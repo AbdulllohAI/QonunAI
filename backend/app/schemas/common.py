@@ -68,6 +68,8 @@ class Citation(BaseModel):
     date_of_adoption: str | None
     last_updated: str | None
     source_url: str | None
+    act_status: str | None = None
+    excerpt: str | None = None
     score: float
     supporting: bool = False
 
@@ -87,6 +89,7 @@ class ChatRequest(BaseModel):
     act_ids: list[uuid.UUID] | None = None
     provider: str | None = None
     stream: bool = True
+    compact: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -107,6 +110,7 @@ class ChatResponse(BaseModel):
     usage: dict[str, int]
     answered: bool
     refusal_reason: str | None = None
+    follow_ups: list[str] = Field(default_factory=list)
 
 
 class ConversationOut(ORMModel):

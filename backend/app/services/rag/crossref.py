@@ -193,6 +193,7 @@ async def expand_cross_references(
                 date_of_adoption=chunk.date_of_adoption,
                 last_updated=chunk.last_updated,
                 source_url=build_deep_link(chunk.source_url or act.source_url, chunk.lexuz_anchor_id),
+                act_status=act.status.value if act.status else None,
                 fused_score=0.3,
                 via_crossref_from=wanted[key],
             )

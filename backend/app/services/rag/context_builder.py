@@ -60,6 +60,43 @@ class BuiltContext:
         return not self.sources
 
 
+#: lex.uz page furniture that the ingester swept into the article text. Stripped
+#: for display only — fixing it at the source is an ingestion concern, but until
+#: then it should not reach a citation card.
+_BOILERPLATE = re.compile(
+    r"(?:Предложения\s+по\s+документу"
+    r"|Получить\s+ссылку\s+из\s+элемента\s+документа"
+    r"|Ҳужжат\s+бўйича\s+таклифлар"
+    r"|Ҳужжат\s+элементидан\s+ҳавола\s+олиш"
+    r"|Hujjat\s+bo['ʻ’]yicha\s+takliflar"
+    r"|Oldingi\s+tahrirga\s+qarang"
+    r"|Олдинги\s+таҳрирга\s+қаранг)\.?",
+    re.IGNORECASE | re.UNICODE,
+)
+
+#: The card already shows the article number and heading, so repeating them in
+#: the excerpt wastes the reader's first line.
+_LEADING_ARTICLE = re.compile(
+    r"^\s*(?:\d+(?:\s+\d+)?\s*[-–]\s*(?:модда|modda)|стать[яи]\s+\d+(?:\s+\d+)?)\s*[.．]?\s*",
+    re.IGNORECASE | re.UNICODE,
+)
+
+
+def _excerpt(text: str, limit: int = 260) -> str:
+    """Short preview of the cited provision for the citation card.
+
+    Trimmed on a word boundary so the card never cuts mid-word.
+    """
+    cleaned = _BOILERPLATE.sub(" ", text or "")
+    cleaned = " ".join(cleaned.split())
+    cleaned = _LEADING_ARTICLE.sub("", cleaned)
+    if len(cleaned) <= limit:
+        return cleaned
+    cut = cleaned[:limit]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > limit * 0.6 else cut).rstrip(" ,.;:") + "…"
+
+
 @dataclass(slots=True)
 class SourceRef:
     tag: str
@@ -80,6 +117,8 @@ class SourceRef:
             "date_of_adoption": c.date_of_adoption.isoformat() if c.date_of_adoption else None,
             "last_updated": c.last_updated.isoformat() if c.last_updated else None,
             "source_url": c.source_url,
+            "act_status": c.act_status,
+            "excerpt": _excerpt(c.text),
             "score": round(c.score, 4),
             "supporting": c.via_crossref_from is not None,
         }
