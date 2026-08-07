@@ -289,15 +289,41 @@ first query. It is now off *deliberately* — `DENSE_RETRIEVAL_ENABLED=false`,
 with `/health` reporting `dense_retrieval: false` and an overall `degraded`
 status — rather than off by accident and reporting healthy.
 
-To enable it:
+### What this actually costs the product
+
+Cross-language retrieval is the casualty, and the corpus makes that expensive:
+
+| Script / language | Chunks | Share |
+|---|---|---|
+| Uzbek Cyrillic | 5,904 | 51% |
+| Russian | 4,927 | 43% |
+| Uzbek Latin | 707 | 6% |
+
+Latin↔Cyrillic is bridged lexically by the transliteration layer, so Latin-script
+queries do reach the Cyrillic material. **Uzbek↔Russian is bridged only by the
+shared embedding space** — nothing lexical connects `odam oʻgʻirlash` to
+`похищение человека`. With dense retrieval off, a Latin-script Uzbek query
+cannot reach 43% of the corpus at all.
+
+That is not hypothetical. Asked *"Odam oʻgʻirlash uchun qanday jazo
+belgilangan?"*, the live app correctly refuses to answer rather than inventing
+one — the citation guarantee holds — but it never finds Criminal Code art. 137,
+which the equivalent Russian query returns as its top hit in 740 ms.
+
+### Enabling it
 
 ```bash
 flyctl scale memory 8192 -a uzlex-ai
 ```
 
-then set `PREFETCH_MODELS`, `DENSE_RETRIEVAL_ENABLED` and `RERANKER_ENABLED` to
-`'true'` in `backend/fly.toml` and redeploy. Prefetching matters: without it the
-weights download on first request instead of baking into the image.
+Then set `PREFETCH_MODELS = 'true'` under `[build.args]`, set
+`DENSE_RETRIEVAL_ENABLED = 'true'` in `[env]`, and redeploy. Prefetching matters:
+without it the weights download on the first user request instead of baking into
+the image.
+
+`RERANKER_ENABLED` is a **Fly secret**, and secrets silently shadow `fly.toml`
+`[env]` — set it with `flyctl secrets set RERANKER_ENABLED=true`, not by editing
+the file. Check `flyctl secrets list` before trusting any value in `[env]`.
 
 ## 📊 Retrieval benchmark
 
