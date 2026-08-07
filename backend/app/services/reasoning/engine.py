@@ -26,13 +26,15 @@ from app.services.rag.types import RetrievalResult
 from app.services.reasoning import hierarchy as hierarchy_mod
 from app.services.reasoning import risk as risk_mod
 from app.services.reasoning import validator as validator_mod
+from app.services.memory.manager import MemoryContext, memory_manager
+from app.services.reasoning.intent import Intent, classify_intent, conversational_reply
 from app.services.reasoning.prompts import (
     DISCLAIMER_BY_LANG,
     GREETING_RESPONSES,
     NO_CONTEXT_MESSAGES,
     build_system_prompt,
     context_message,
-    is_greeting,
+    extract_follow_ups,
 )
 
 log = get_logger(__name__)
@@ -59,6 +61,7 @@ class LegalAnswer:
     retrieved_chunk_ids: list[str] = field(default_factory=list)
     answered: bool = True
     refusal_reason: str | None = None
+    follow_ups: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +84,7 @@ class LegalAnswer:
             "usage": {"tokens_in": self.tokens_in, "tokens_out": self.tokens_out},
             "answered": self.answered,
             "refusal_reason": self.refusal_reason,
+            "follow_ups": self.follow_ups,
         }
 
 
@@ -127,7 +131,9 @@ class ReasoningEngine:
             refusal_reason="no_context",
         )
 
-    def _greeting_answer(self, lang: Language, mode: str, started: float) -> LegalAnswer:
+    def _conversational_answer(
+        self, intent: Intent, lang: Language, mode: str, started: float
+    ) -> LegalAnswer:
         """Short-circuit before retrieval even runs.
 
         Retrieval's own top-3 fallback (for when nothing clears the relevance
@@ -142,13 +148,13 @@ class ReasoningEngine:
         fact.
         """
         return LegalAnswer(
-            answer=GREETING_RESPONSES[lang],
+            answer=conversational_reply(intent, lang) or GREETING_RESPONSES[lang],
             disclaimer=DISCLAIMER_BY_LANG[lang],
             language=lang.value,
             mode=mode,
             risk=risk_mod.RiskAssessment(
                 level=risk_mod.RiskLevel.LOW,
-                factors=["Greeting — no legal question was asked."],
+                factors=[f"{intent.value.capitalize()} — no legal question was asked."],
             ).to_dict(),
             total_ms=int((time.perf_counter() - started) * 1000),
             answered=True,
@@ -168,11 +174,14 @@ class ReasoningEngine:
         top_k: int | None = None,
         provider: str | None = None,
         document_text: str | None = None,
+        compact: bool = False,
+        user_id: uuid.UUID | None = None,
     ) -> LegalAnswer:
         started = time.perf_counter()
         lang = language or detect_language(question)
-        if not document_text and is_greeting(question):
-            return self._greeting_answer(lang, mode, started)
+        intent = Intent.LEGAL if document_text else classify_intent(question)
+        if intent is not Intent.LEGAL:
+            return self._conversational_answer(intent, lang, mode, started)
 
         retrieval_query = _retrieval_query(question, document_text)
         lang, retrieval, context = await self._prepare(
@@ -188,9 +197,16 @@ class ReasoningEngine:
         if context.is_empty:
             return self._no_context_answer(lang, mode, retrieval.took_ms, started)
 
-        system = build_system_prompt(mode, lang)
+        mem_ctx = MemoryContext()
+        if user_id and mode == "qa":
+            mem_ctx = await memory_manager.get_context(session, user_id, question)
+
+        system = build_system_prompt(mode, lang, compact=compact)
         user_turn = context_message(
-            context.text, _user_payload(question, document_text), mode=mode
+            context.text,
+            _user_payload(question, document_text),
+            mode=mode,
+            memory_block=mem_ctx.to_prompt_block(),
         )
         messages = list(history or []) + [ChatMessage(role="user", content=user_turn)]
 
@@ -217,7 +233,7 @@ class ReasoningEngine:
                 refusal_reason="model_refusal",
             )
 
-        return self._finalise(
+        result = self._finalise(
             question=question,
             raw_answer=llm_response.text,
             context=context,
@@ -232,6 +248,12 @@ class ReasoningEngine:
             llm_ms=llm_response.latency_ms,
             started=started,
         )
+        if user_id and mode == "qa":
+            await memory_manager.record(
+                session, user_id, question, result.answer,
+                lang.value, compact, result.answered,
+            )
+        return result
 
     # ------------------------------------------------------------------ stream
     async def stream(
@@ -246,15 +268,14 @@ class ReasoningEngine:
         act_ids: Sequence[uuid.UUID] | None = None,
         provider: str | None = None,
         document_text: str | None = None,
+        compact: bool = False,
+        user_id: uuid.UUID | None = None,
     ) -> AsyncIterator[dict]:
         started = time.perf_counter()
         lang = language or detect_language(question)
-        if not document_text and is_greeting(question):
-            # "meta" was already sent by the caller before stream() was
-            # invoked (see chat.py) — the contract from here on is
-            # sources -> delta -> done, same as the retrieval path below,
-            # just with an empty sources list since none were fetched.
-            result = self._greeting_answer(lang, mode, started)
+        intent = Intent.LEGAL if document_text else classify_intent(question)
+        if intent is not Intent.LEGAL:
+            result = self._conversational_answer(intent, lang, mode, started)
             yield {"type": "sources", "sources": [], "retrieval_ms": 0, "language": lang.value}
             yield {"type": "delta", "text": result.answer}
             yield {"type": "done", "result": result.to_dict()}
@@ -270,8 +291,6 @@ class ReasoningEngine:
             top_k=None,
         )
 
-        # Emit sources first so the UI can render citation chips while the answer
-        # is still generating.
         yield {
             "type": "sources",
             "sources": [s.to_citation_dict() for s in context.sources],
@@ -285,9 +304,16 @@ class ReasoningEngine:
             yield {"type": "done", "result": result.to_dict()}
             return
 
-        system = build_system_prompt(mode, lang)
+        mem_ctx = MemoryContext()
+        if user_id and mode == "qa":
+            mem_ctx = await memory_manager.get_context(session, user_id, question)
+
+        system = build_system_prompt(mode, lang, compact=compact)
         user_turn = context_message(
-            context.text, _user_payload(question, document_text), mode=mode
+            context.text,
+            _user_payload(question, document_text),
+            mode=mode,
+            memory_block=mem_ctx.to_prompt_block(),
         )
         messages = list(history or []) + [ChatMessage(role="user", content=user_turn)]
 
@@ -321,8 +347,11 @@ class ReasoningEngine:
             llm_ms=final_response.latency_ms if final_response else 0,
             started=started,
         )
-        # The client replaces the streamed text with `result.answer`: validation
-        # may have stripped fabricated citations from what was already shown.
+        if user_id and mode == "qa":
+            await memory_manager.record(
+                session, user_id, question, result.answer,
+                lang.value, compact, result.answered,
+            )
         yield {"type": "done", "result": result.to_dict()}
 
     # ---------------------------------------------------------------- finalise
@@ -343,6 +372,10 @@ class ReasoningEngine:
         llm_ms: int,
         started: float,
     ) -> LegalAnswer:
+        # Strip the follow-up block before validation so the validator only sees
+        # the real answer text — and so follow-up questions never reach the user
+        # as part of the answer body even if the client doesn't strip them.
+        raw_answer, follow_ups = extract_follow_ups(raw_answer)
         validation = validator_mod.validate(raw_answer, context.sources)
         analysis = hierarchy_mod.resolve(
             [s.chunk for s in context.sources if s.chunk.via_crossref_from is None]
@@ -408,6 +441,7 @@ class ReasoningEngine:
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             retrieved_chunk_ids=[str(c.chunk_id) for c in retrieval.chunks],
+            follow_ups=follow_ups,
         )
 
 
