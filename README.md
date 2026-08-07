@@ -48,7 +48,7 @@ generic "looks fine to me."
 |---|---|
 | 📌 **Citation-grounded Q&A** | Every legal statement carries an `[Sn]` tag resolving to a specific article. Uncited or unverifiable answers are rejected, not softened. |
 | 🔗 **Article-level deep links** | Citations open the *provision*, not the top of a 4 MB document — `lex.uz/docs/6257288#6259020` lands directly on 80-modda. See [Deep linking into lex.uz](#-deep-linking-into-lexuz). |
-| 🔍 **Hybrid retrieval** | Dense (`bge-m3` + pgvector HNSW) + sparse (per-language Postgres FTS) + exact-article lookup, fused and cross-encoder reranked. |
+| 🔍 **Hybrid retrieval** | Dense (`bge-m3` + pgvector HNSW) + sparse (per-language Postgres FTS) + article-title + exact-article lookup, fused by RRF and cross-encoder reranked. **The live deployment currently runs the sparse, title and exact branches only** — see [Deployment status](#-deployment-status). |
 | ⚖️ **Legal hierarchy reasoning** | Constitution > Codes > Laws > Decrees, then *lex specialis*, then *lex posterior* — computed deterministically from adoption dates and act type, not left to the model to reason about on the fly. |
 | 🔗 **Cross-reference expansion** | "…in the cases provided for by Article 333 of this Code" automatically pulls Article 333 into context. |
 | 📄 **Document analysis** | Contracts segmented clause-by-clause, screened against mandatory Uzbek norms by both regex red-flags and an LLM compliance pass, with risk levels and concrete redrafting suggestions. |
@@ -261,6 +261,43 @@ Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
 validation (hallucinations reaching users), the hierarchy-of-force rules
 (wrong legal conclusions), and anchor extraction (citations that open the
 wrong article).
+
+## 🚧 Deployment status
+
+The live app at `uzlex-ai.fly.dev` runs a **reduced** version of the pipeline
+described above. Dense retrieval and cross-encoder reranking are switched off.
+
+The honest history: `sentence-transformers` was never listed in
+`requirements.txt`. Every chunk in the corpus carries a real `bge-m3` vector —
+1024-dim, unit-norm, 11,042 distinct across 11,538 chunks — because ingestion
+embedded them elsewhere. But the *query* side could not embed, so the dense
+branch raised on every single request, the retriever quietly fused three
+branches instead of four, and the reranker never ran at all. Nothing said so:
+`/health` reported `embedded_chunks: 11538` and a green status throughout,
+because that field counts documents and cannot detect a broken query path.
+
+**The benchmark numbers below were measured in that state** — Recall@5 = 0.833
+on sparse, title and exact matching alone. Turning dense retrieval on should
+improve them, particularly on the remaining failures, which are all questions
+whose governing article *paraphrases* the query instead of sharing its
+vocabulary — exactly what dense retrieval is for. That improvement is
+unmeasured, and is not claimed here until it is.
+
+Why it is still off: `bge-m3` and `bge-reranker-v2-m3` are ~2.3 GB of weights
+each, and the machines are 2 GB. Enabling it without more memory OOMs on the
+first query. It is now off *deliberately* — `DENSE_RETRIEVAL_ENABLED=false`,
+with `/health` reporting `dense_retrieval: false` and an overall `degraded`
+status — rather than off by accident and reporting healthy.
+
+To enable it:
+
+```bash
+flyctl scale memory 8192 -a uzlex-ai
+```
+
+then set `PREFETCH_MODELS`, `DENSE_RETRIEVAL_ENABLED` and `RERANKER_ENABLED` to
+`'true'` in `backend/fly.toml` and redeploy. Prefetching matters: without it the
+weights download on first request instead of baking into the image.
 
 ## 📊 Retrieval benchmark
 
