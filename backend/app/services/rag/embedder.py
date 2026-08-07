@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.util
 from typing import Sequence
 
 import numpy as np
@@ -25,6 +26,15 @@ QUERY_PREFIX = "Represent this legal question for retrieving relevant statutes: 
 _CACHE_TTL_S = 60 * 60 * 24 * 30
 
 
+class EmbeddingUnavailable(RuntimeError):
+    """The embedding model cannot be loaded, so dense retrieval is impossible.
+
+    Distinct from a transient encode error: this means the deployment is
+    missing something (the package, the weights, or the memory to hold them),
+    and every dense query will fail until that is fixed.
+    """
+
+
 class Embedder:
     """Thread-safe, lazily-loaded sentence-transformer wrapper."""
 
@@ -32,21 +42,98 @@ class Embedder:
         self._model = None
         self._lock = asyncio.Lock()
         self._redis: aioredis.Redis | None = None
+        self._load_error: str | None = None
+        """Why the model could not load. Sticky: once loading fails for a
+        structural reason it will keep failing, and retrying the multi-second
+        load on every request turns a degradation into a latency outage."""
 
     # -------------------------------------------------------------- lifecycle
     async def _get_model(self):
         if self._model is None:
             async with self._lock:
                 if self._model is None:
-                    from sentence_transformers import SentenceTransformer
+                    if self._load_error is not None:
+                        raise EmbeddingUnavailable(self._load_error)
+                    if not settings.DENSE_RETRIEVAL_ENABLED:
+                        self._load_error = (
+                            "dense retrieval is switched off "
+                            "(DENSE_RETRIEVAL_ENABLED=false); queries run on "
+                            "keyword search alone"
+                        )
+                        raise EmbeddingUnavailable(self._load_error)
+                    try:
+                        from sentence_transformers import SentenceTransformer
 
-                    log.info("loading embedding model", extra={"model": settings.EMBEDDING_MODEL})
-                    self._model = await asyncio.to_thread(
-                        SentenceTransformer,
-                        settings.EMBEDDING_MODEL,
-                        device=settings.EMBEDDING_DEVICE,
-                    )
+                        log.info(
+                            "loading embedding model",
+                            extra={"model": settings.EMBEDDING_MODEL},
+                        )
+                        self._model = await asyncio.to_thread(
+                            SentenceTransformer,
+                            settings.EMBEDDING_MODEL,
+                            device=settings.EMBEDDING_DEVICE,
+                        )
+                    except ImportError as exc:
+                        self._load_error = (
+                            f"sentence-transformers is not installed ({exc}). Dense "
+                            "retrieval is disabled; queries fall back to keyword search."
+                        )
+                    except MemoryError as exc:
+                        self._load_error = (
+                            f"not enough memory to load {settings.EMBEDDING_MODEL} ({exc}). "
+                            "bge-m3 needs roughly 2.3 GB of weights plus runtime."
+                        )
+                    except Exception as exc:  # noqa: BLE001 - weights, network, device
+                        self._load_error = (
+                            f"could not load {settings.EMBEDDING_MODEL}: {exc}"
+                        )
+                    if self._load_error is not None:
+                        # Loud, and at error level: a dead dense branch is
+                        # indistinguishable from a branch that merely found
+                        # nothing, which is exactly how this went unnoticed.
+                        log.error(
+                            "embedding_model_unavailable",
+                            extra={
+                                "model": settings.EMBEDDING_MODEL,
+                                "error": self._load_error,
+                            },
+                        )
+                        raise EmbeddingUnavailable(self._load_error)
         return self._model
+
+    def availability(self) -> tuple[bool, str | None]:
+        """Report whether dense retrieval can run — cheaply.
+
+        Called by ``/health`` so a deployment missing the embedding stack
+        surfaces as degraded instead of reporting a healthy corpus while
+        silently answering every question from keyword search alone.
+
+        Deliberately does **not** load the weights. ``/health`` is polled every
+        30s by the platform; pulling 2.3 GB of bge-m3 into memory on each probe
+        would OOM-kill the very machine the probe exists to protect. So this
+        checks the two things that are cheap and that actually broke here — is
+        the package importable, and did a previous load already fail — and
+        leaves the real load lazy on first query.
+        """
+        if self._model is not None:
+            return True, None
+        if self._load_error is not None:
+            return False, self._load_error
+        if not settings.DENSE_RETRIEVAL_ENABLED:
+            return False, (
+                "dense retrieval is switched off (DENSE_RETRIEVAL_ENABLED=false). "
+                "Queries are answered from keyword search alone."
+            )
+
+        spec = importlib.util.find_spec("sentence_transformers")
+        if spec is None:
+            return False, (
+                "sentence-transformers is not installed. Dense retrieval is "
+                "disabled; every query is answered from keyword search alone."
+            )
+        # Importable but not yet loaded. Report available: the weights load on
+        # first use, and any failure there becomes sticky and shows up here.
+        return True, None
 
     async def _get_redis(self) -> aioredis.Redis:
         if self._redis is None:

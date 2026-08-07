@@ -40,8 +40,15 @@ class Reranker:
                             max_length=1024,
                         )
                     except Exception as exc:
-                        # Degrade to fusion-only ranking rather than failing the query.
-                        log.warning("reranker unavailable", extra={"error": str(exc)})
+                        # Degrade to fusion-only ranking rather than failing the
+                        # query -- but say so at error level. This warning sat in
+                        # production logs while the cross-encoder never once ran,
+                        # and the ranking it was supposed to provide was simply
+                        # absent from every answer.
+                        log.error(
+                            "reranker_unavailable_using_fusion_order_only",
+                            extra={"error": str(exc), "model": settings.RERANKER_MODEL},
+                        )
                         self._unavailable = True
         return self._model
 

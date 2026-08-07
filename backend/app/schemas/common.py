@@ -269,3 +269,7 @@ class HealthResponse(BaseModel):
     vector_backend: str
     llm_providers: list[dict[str, Any]]
     corpus: dict[str, int]
+    dense_retrieval: bool = True
+    """Whether the query side can embed. `corpus.embedded_chunks` covers only
+    the documents and stays green even when no query can be embedded at all."""
+    dense_retrieval_error: str | None = None

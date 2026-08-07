@@ -47,9 +47,12 @@ USER uzlex
 # the app source, so routine app-code changes reuse this layer from cache
 # instead of re-downloading ~7GB of models on every rebuild.
 ARG PREFETCH_MODELS=true
+ARG EMBEDDING_MODEL=BAAI/bge-m3
 RUN if [ "$PREFETCH_MODELS" = "true" ]; then \
-      python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; \
-SentenceTransformer('BAAI/bge-m3'); CrossEncoder('BAAI/bge-reranker-v2-m3')" ; \
+        python -c "from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('${EMBEDDING_MODEL}', device='cpu')" ; \
+    else \
+        echo "PREFETCH_MODELS=$PREFETCH_MODELS - skipping weight download; the first query pays the load" ; \
     fi
 
 COPY --chown=uzlex:uzlex . .

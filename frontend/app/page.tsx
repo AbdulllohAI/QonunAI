@@ -1,5 +1,9 @@
-import { AppShell } from "@/components/AppShell";
+import Link from "next/link";
 
 export default function Home() {
-  return <AppShell initialTab="chat" />;
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <Link href="/chat">Enter QonunAI</Link>
+    </div>
+  );
 }

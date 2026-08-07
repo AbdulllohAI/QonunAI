@@ -22,14 +22,6 @@ pyjwt==2.10.1
 passlib[bcrypt]==1.7.4
 bcrypt==4.2.1
 
-# ---- retrieval -------------------------------------------------------------
-sentence-transformers==3.3.1
-torch==2.5.1
-numpy==1.26.4
-faiss-cpu==1.9.0.post1
-chromadb==0.5.23
-rank-bm25==0.2.2
-
 # ---- ingestion / parsing ---------------------------------------------------
 httpx==0.28.1
 beautifulsoup4==4.12.3
@@ -47,9 +39,9 @@ langdetect==1.0.9
 anthropic==0.42.0
 openai==1.59.6
 
-# ---- dev / test ------------------------------------------------------------
-pytest==8.3.4
-pytest-asyncio==0.25.2
-pytest-cov==6.0.0
-httpx-sse==0.4.0
-ruff==0.8.6
+# ---- embeddings / reranking ------------------------------------------------
+# Absent from this file until now, while torch was installed and every chunk in
+# the corpus carried a bge-m3 vector. The result: documents were embedded but
+# queries could not be, so the dense branch raised on every request and the
+# hybrid retriever silently ran on keyword search alone.
+sentence-transformers==3.3.1

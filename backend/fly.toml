@@ -13,6 +13,19 @@ primary_region = 'fra'
   DEBUG = 'false'
   ENV = 'prod'
   PREFETCH_MODELS = 'false'
+  # Off because this machine is 2 GB and bge-m3 alone is ~2.3 GB of weights;
+  # loading it here would OOM-kill the machine on the first query. It was
+  # already effectively off — sentence-transformers was missing from the image,
+  # so the dense branch raised on every request and nothing said so. This makes
+  # that state deliberate and visible: /health now reports `dense_retrieval:
+  # false` and an overall `degraded` status while it stays this way.
+  #
+  # To turn dense retrieval on: `flyctl scale memory 8192` (bge-m3 and
+  # bge-reranker-v2-m3 are ~2.3 GB each, plus runtime), set PREFETCH_MODELS to
+  # 'true' so the weights bake into the image instead of downloading on first
+  # request, then set this to 'true' and deploy.
+  DENSE_RETRIEVAL_ENABLED = 'false'
+  RERANKER_ENABLED = 'false'
   TORCH_INDEX_URL = 'https://download.pytorch.org/whl/cpu'
   UVICORN_WORKERS = '1'
 

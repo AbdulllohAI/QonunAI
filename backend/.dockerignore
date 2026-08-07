@@ -1,10 +1,27 @@
 __pycache__/
 *.py[cod]
+
+# venvs (both types)
+venv/
 .venv/
+
+# python caches
 .pytest_cache/
 .ruff_cache/
-data/
-!data/.gitkeep
+.mypy_cache/
+
+# env + git
 .env
 .git/
+
+# big stuff
+data/
+*.log
+*.sqlite
+*.db
+
+# node (just in case)
+node_modules/
+
+# docs
 *.md

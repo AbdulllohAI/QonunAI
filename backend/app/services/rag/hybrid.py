@@ -122,10 +122,11 @@ class HybridRetriever:
         dense_hits, sparse_hits, exact_hits, heading_hits = await asyncio.gather(
             dense_task, sparse_task, exact_task, heading_task, return_exceptions=True
         )
-        dense_hits = _unwrap(dense_hits, "dense")
-        sparse_hits = _unwrap(sparse_hits, "sparse")
-        exact_hits = _unwrap(exact_hits, "exact-article")
-        heading_hits = _unwrap(heading_hits, "heading")
+        degraded: dict[str, str] = {}
+        dense_hits = _unwrap(dense_hits, "dense", degraded)
+        sparse_hits = _unwrap(sparse_hits, "sparse", degraded)
+        exact_hits = _unwrap(exact_hits, "exact-article", degraded)
+        heading_hits = _unwrap(heading_hits, "heading", degraded)
 
         fused = self._fuse(dense_hits, sparse_hits, heading_hits)
 
@@ -169,6 +170,7 @@ class HybridRetriever:
             sparse_hits=len(sparse_hits),
             crossref_hits=len(crossref_chunks),
             took_ms=int((time.perf_counter() - started) * 1000),
+            degraded_branches=degraded,
         )
 
     # ------------------------------------------------------- session isolation
@@ -364,9 +366,14 @@ class HybridRetriever:
         )
 
 
-def _unwrap(result, label: str) -> list:
+def _unwrap(result, label: str, degraded: dict[str, str] | None = None) -> list:
     if isinstance(result, BaseException):
-        log.warning("retrieval branch failed", extra={"branch": label, "error": str(result)})
+        # error, not warning: losing a whole branch silently changes what the
+        # system is — a hybrid retriever running on keyword search alone still
+        # returns plausible results, so nothing downstream notices.
+        log.error("retrieval_branch_failed", extra={"branch": label, "error": str(result)})
+        if degraded is not None:
+            degraded[label] = str(result)
         return []
     return result
 

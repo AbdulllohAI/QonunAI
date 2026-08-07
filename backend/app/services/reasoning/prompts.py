@@ -20,6 +20,26 @@ from app.db.models import Language
 # and the model dutifully built a confident, fully-cited, HIGH-risk answer
 # out of them — observed producing an answer about criminal liability for
 # religious extremism in response to "hello."
+_FOLLOWUP_RE = re.compile(
+    r"\n---FOLLOW-UP---[ \t]*\n((?:\d+\.[ \t]+[^\n]+\n?){1,5})",
+    re.IGNORECASE,
+)
+
+
+def extract_follow_ups(text: str) -> tuple[str, list[str]]:
+    """Strip the follow-up block from raw model output and return (clean_text, questions)."""
+    m = _FOLLOWUP_RE.search(text)
+    if not m:
+        return text.rstrip(), []
+    clean = text[: m.start()].rstrip()
+    questions = [
+        re.sub(r"^\d+\.\s*", "", line).strip()
+        for line in m.group(1).splitlines()
+        if line.strip()
+    ]
+    return clean, [q for q in questions if q][:3]
+
+
 _GREETING_RE = re.compile(
     r"^(salom(lar)?|assalomu?\s*alaykum|привет|здравствуйте|добрый\s*(день|вечер|утро)"
     r"|hi|hello|hey|xayrli\s*(kun|kech|tong)|rahmat|рахмат|спасибо|thanks?|thank\s*you"
@@ -180,7 +200,18 @@ _QA_TAIL = """
 ## This turn
 
 The user's question and the retrieved SOURCES follow in the next message. Answer only \
-from those sources."""
+from those sources.
+
+After your complete answer, append the block below **exactly as shown** — it is \
+stripped server-side before display, so it never reaches the user:
+
+---FOLLOW-UP---
+1. [Follow-up question 1 in the same language as your answer]
+2. [Follow-up question 2 in the same language as your answer]
+3. [Follow-up question 3 in the same language as your answer]
+
+Make each follow-up specific to what you just answered and actionable. If the answer \
+was a refusal or the question was off-topic, skip the block entirely."""
 
 _DOC_ANALYSIS = """You are QonunAI analysing a legal document (a contract, agreement, \
 notice, or claim) against the law of the Republic of Uzbekistan. Write like a lawyer \
@@ -254,17 +285,28 @@ _MODE_PROMPTS = {
 }
 
 
-def build_system_prompt(mode: str, answer_language: Language) -> str:
-    """Frozen per (mode, language) — do not interpolate dates or IDs in here."""
+_COMPACT_ADDENDUM = (
+    "\n\n## Quick-answer mode\n\n"
+    "The user has requested a concise answer. Write **only** the ✅ Short answer section "
+    "(2-3 lines maximum). Skip all other sections including the follow-up block. "
+    "Still cite [Sn] tags inline on every substantive claim."
+)
+
+
+def build_system_prompt(
+    mode: str, answer_language: Language, *, compact: bool = False
+) -> str:
+    """Frozen per (mode, language, compact) — do not interpolate dates or IDs in here."""
     base = _MODE_PROMPTS.get(mode, _MODE_PROMPTS["qa"])
-    return (
-        f"{base}\n\n## Answer language\n\n"
+    lang_section = (
+        f"\n\n## Answer language\n\n"
         f"Write the entire answer in {LANGUAGE_NAME[answer_language]}, including the "
         f"section headings. Keep legal citations in their original form "
         f"(article numbers and act names) so they remain verifiable. If the source "
         f"text is in another language, translate accurately rather than paraphrasing "
         f"loosely — a mistranslated statutory term is a wrong answer."
     )
+    return base + lang_section + (_COMPACT_ADDENDUM if compact else "")
 
 
 NO_CONTEXT_MESSAGES: dict[Language, str] = {
@@ -287,14 +329,18 @@ NO_CONTEXT_MESSAGES: dict[Language, str] = {
 }
 
 
-def context_message(context: str, question: str, mode: str = "qa") -> str:
+def context_message(
+    context: str, question: str, mode: str = "qa", memory_block: str = ""
+) -> str:
     """The user-turn payload. Everything volatile lives here, after the cache
     breakpoint on the system prompt."""
     label = "DOCUMENT AND QUESTION" if mode == "document_analysis" else "QUESTION"
+    mem_section = f"{memory_block}\n" if memory_block else ""
     return (
         "SOURCES\n"
         "=======\n"
         f"{context}\n\n"
+        f"{mem_section}"
         f"{label}\n"
         f"{'=' * len(label)}\n"
         f"{question}\n\n"

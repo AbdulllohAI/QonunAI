@@ -104,6 +104,8 @@ async def chat(
         act_types=payload.act_types,
         act_ids=payload.act_ids,
         provider=payload.provider,
+        compact=payload.compact,
+        user_id=user.id if user else None,
     )
 
     assistant = Message(
@@ -190,6 +192,8 @@ async def chat_stream(
                     act_types=payload.act_types,
                     act_ids=payload.act_ids,
                     provider=payload.provider,
+                    compact=payload.compact,
+                    user_id=user.id if user else None,
                 ):
                     if event["type"] == "done":
                         final = event["result"]

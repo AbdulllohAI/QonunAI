@@ -65,8 +65,18 @@ class RetrievalResult:
     crossref_hits: int = 0
     took_ms: int = 0
 
+    degraded_branches: dict[str, str] = field(default_factory=dict)
+    """Branches that raised, mapped to why. A branch that is broken returns the
+    same empty list as a branch that simply matched nothing, so without this
+    the two are indistinguishable — which is how a completely dead dense
+    branch served production traffic unnoticed."""
+
     def top(self, n: int) -> list[RetrievedChunk]:
         return self.chunks[:n]
+
+    @property
+    def is_degraded(self) -> bool:
+        return bool(self.degraded_branches)
 
     @property
     def is_empty(self) -> bool:

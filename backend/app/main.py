@@ -55,7 +55,13 @@ async def lifespan(app: FastAPI):
         await embedder.embed_texts(["warmup"], use_cache=False)
         log.info("embedding model warm")
     except Exception as exc:
-        log.warning("embedding warmup failed", extra={"error": str(exc)})
+        # error, not warning: if the warmup cannot embed, *no* query can, and
+        # the service will answer every question from keyword search while
+        # still looking healthy. This line failing is a production incident.
+        log.error(
+            "embedding_warmup_failed_dense_retrieval_disabled",
+            extra={"error": str(exc), "model": settings.EMBEDDING_MODEL},
+        )
 
     yield
 
@@ -208,14 +214,31 @@ async def health():
     except Exception as exc:
         log.warning("redis health check failed", extra={"error": str(exc)})
 
+    # Whether dense retrieval can actually run. `corpus.embedded_chunks` only
+    # says the *documents* were embedded; it stays green even when the query
+    # side cannot embed anything, in which case every search silently runs on
+    # keyword matching alone. Checking the query side is the part that matters.
+    dense_ok = False
+    dense_error: str | None = None
+
+    try:
+        dense_ok, dense_error = embedder.availability()
+    except Exception as exc:  # noqa: BLE001
+        dense_error = str(exc)
+
+    if not dense_ok:
+        log.error("dense_retrieval_unavailable", extra={"error": dense_error})
+
     return HealthResponse(
-        status="ok" if database_ok else "degraded",
+        status="ok" if (database_ok and dense_ok) else "degraded",
         version=VERSION,
         database=database_ok,
         redis=redis_ok,
         vector_backend=settings.VECTOR_BACKEND.value,
         llm_providers=llm_router.available(),
         corpus=corpus,
+        dense_retrieval=dense_ok,
+        dense_retrieval_error=dense_error,
     )
 
 

@@ -1,16 +1,21 @@
-import type { Metadata } from "next";
 import "./globals.css";
+import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "QonunAI — Uzbekistan legal research",
-  description:
-    "AI legal research for the Republic of Uzbekistan. Citation-grounded answers in Uzbek, Russian and English.",
+  title: "QonunAI",
+  description: "God-tier AI chat",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="uz" suppressHydrationWarning>
-      <body className="min-h-screen">{children}</body>
+    <html lang="en">
+      <body className="bg-black text-white antialiased">
+        {children}
+      </body>
     </html>
   );
 }

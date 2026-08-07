@@ -71,6 +71,17 @@ class Settings(BaseSettings):
     RERANK_CANDIDATE_CAP: int = 30
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     RERANKER_ENABLED: bool = True
+
+    DENSE_RETRIEVAL_ENABLED: bool = True
+    """Whether to load the embedding model and run the dense branch.
+
+    True is the right default: dense retrieval is what makes this a hybrid
+    system rather than keyword search. It exists as a switch because bge-m3 and
+    bge-reranker-v2-m3 are ~2.3 GB of weights *each*, so a host too small to
+    hold them will OOM on first query. Turning this off is a deliberate,
+    visible choice — `/health` reports the system as degraded while it is off,
+    which is the whole point. Silence is what let this break unnoticed before.
+    """
     MIN_RELEVANCE_SCORE: float = 0.25
     CROSSREF_EXPANSION_LIMIT: int = 6
     # Retrieved-context token budget fed into the prompt. Kept conservative by
