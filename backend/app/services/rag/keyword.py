@@ -25,20 +25,13 @@ from app.core.logging import get_logger
 from app.db.models import ActStatus, ActType, Chunk, LegalAct, Language
 from app.services.lang.translit import cyrillic_to_latin, normalize, script_variants
 from app.services.rag.query_prep import content_tokens, stem_variants
+from app.services.rag.references import (  # noqa: F401  (re-exported)
+    LegalReference,
+    extract_article_numbers,
+    parse_references,
+)
 
 log = get_logger(__name__)
-
-# "Article 54", "54-modda", "modda 54", "статья 54", "ст. 54", "54-moddasi"
-_ARTICLE_PATTERNS = [
-    re.compile(r"\barticle\s+(\d+(?:[-–]\d+)?)", re.IGNORECASE),
-    re.compile(r"\b(\d+(?:[-–]\d+)?)\s*[-–]?\s*modda", re.IGNORECASE),
-    re.compile(r"\bmodda\s*[-–]?\s*(\d+(?:[-–]\d+)?)", re.IGNORECASE),
-    re.compile(r"\bстать[яеиюй]\s*(\d+(?:[-–]\d+)?)", re.IGNORECASE),
-    re.compile(r"\bст\.?\s*(\d+(?:[-–]\d+)?)", re.IGNORECASE),
-    # Uzbek Cyrillic: "105-модда" and "модда 105".
-    re.compile(r"\b(\d+(?:[-–]\d+)?)\s*[-–]?\s*модда", re.IGNORECASE),
-    re.compile(r"\bмодда\s*[-–]?\s*(\d+(?:[-–]\d+)?)", re.IGNORECASE),
-]
 
 # Maps free-text act mentions onto ActType. Latin, Cyrillic and English forms.
 _ACT_HINTS: list[tuple[re.Pattern[str], ActType]] = [
@@ -59,25 +52,6 @@ _ACT_HINTS: list[tuple[re.Pattern[str], ActType]] = [
     # whose query happened to contain it (verified: this corpus has zero
     # ActType.LAW acts, so the filter matched nothing, every time).
 ]
-
-
-def extract_article_numbers(query: str) -> list[str]:
-    """Article numbers in the order they appear in the query.
-
-    Document order matters: when a question names several articles, the first is
-    usually the primary subject and the rest are context. Collecting per-pattern
-    would instead order by which regex happened to match first.
-    """
-    hits: list[tuple[int, str]] = []
-    for pattern in _ARTICLE_PATTERNS:
-        for match in pattern.finditer(query):
-            hits.append((match.start(), match.group(1).replace("–", "-")))
-
-    found: list[str] = []
-    for _, num in sorted(hits, key=lambda h: h[0]):
-        if num not in found:
-            found.append(num)
-    return found
 
 
 def infer_act_types(query: str) -> list[ActType]:
