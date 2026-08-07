@@ -12,7 +12,8 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-94%20passing-2ea44f)](backend/tests/)
+[![Tests](https://img.shields.io/badge/tests-206%20passing-2ea44f)](backend/tests/)
+[![Recall@5](https://img.shields.io/badge/Recall%405-0.833-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -254,12 +255,51 @@ and time-to-first-token rather than in the retriever.
 cd backend && pytest tests/ -v
 ```
 
-94 unit tests, no database or network required — verified passing. They cover
+206 unit tests, no database or network required — verified passing. They cover
 the places where a silent regression is most damaging: transliteration (halves
 Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
 validation (hallucinations reaching users), the hierarchy-of-force rules
 (wrong legal conclusions), and anchor extraction (citations that open the
 wrong article).
+
+## 📊 Retrieval benchmark
+
+Quality claims are measured, not asserted. `uzlegal-v1`
+([`backend/benchmarks/`](backend/benchmarks/)) holds 30 in-scope questions whose
+gold article labels were read directly from `chunks.heading` in the production
+corpus and hand-verified, plus out-of-scope and adversarial items. A hit
+requires **both** the article number and the act to match, so a coincidental
+article 106 in the wrong code does not count.
+
+```bash
+python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --answers 0
+```
+
+Retrieval runs through `/api/v1/search`, which exercises the full hybrid
+pipeline with no LLM call — so the expensive metric is free to measure.
+
+| Metric | First run | Current | Target |
+|---|---|---|---|
+| Recall@1 | 0.200 | **0.600** | — |
+| Recall@5 | 0.433 | **0.833** | 0.90 |
+| MRR | 0.294 | **0.694** | 0.75 |
+| Median retrieval | 431 ms | 695 ms | < 2000 ms |
+
+Three defects closed that gap, each found by measurement rather than reading code:
+
+1. **Prefix matching ran the wrong direction.** Uzbek has no Postgres stemmer, so
+   the sparse path emits `token:*` — but the prefix applies to the *query* token.
+   Someone typing `шаклда` could never reach an article titled `шакли`.
+2. **Article titles were searchable but drowned.** In nearly every failure the
+   answer sat in the title while hundreds of articles merely *mentioning* the
+   phrase outranked it. A heading-only branch with length-normalised ranking now
+   fuses in at 2× weight.
+3. **Sub-numbered articles were collapsed.** 57, 57¹ and 57² all stored as
+   `"57"` — legally distinct provisions sharing one identifier. 702 articles
+   were renumbered from the lex.uz table of contents.
+
+> **Note the rate limit.** A full run needs `RATE_LIMIT_ANON_PER_HOUR` above 20,
+> or requests start returning 429 around item 20 and score as misses.
 
 ## What's been verified against the real running app
 
@@ -328,10 +368,14 @@ Being direct about these rather than glossing over them:
   this would violate robots.txt — the legitimate route to national-scale
   coverage is a bulk-data agreement with the Ministry of Justice, not a faster
   scraper.
-- **Retrieval quality is unmeasured.** There is no benchmark yet, so claims
-  about answer quality rest on spot checks rather than Recall@k or citation
-  precision. That's the single biggest gap between this and a system you'd
-  stake professional work on.
+- **Retrieval quality is measured, and not yet at target.** `uzlegal-v1`
+  (`backend/benchmarks/`) scores **Recall@5 = 0.833** against a 0.90 target and
+  **MRR = 0.694** against 0.75, on 30 questions whose gold labels were read from
+  the corpus and hand-verified. That is up from 0.433 at first measurement, but
+  roughly one question in six still misses the governing article. The remaining
+  failures share a shape: the article's title *paraphrases* the question rather
+  than sharing its words, so neither the heading branch nor lexical search
+  fires.
 - **Not production-hardened.** Secrets live in a plaintext `.env` (correctly
   gitignored, but not vaulted), there's no rate-limit-aware secrets rotation,
   and this hasn't been through a security review. See the ingestion caveats
