@@ -9,10 +9,15 @@ primary_region = 'fra'
 [build]
   dockerfile = 'Dockerfile'
 
+  [build.args]
+    # Build-time, unlike the [env] block below. Set to 'true' together with
+    # DENSE_RETRIEVAL_ENABLED so the weights bake into the image instead of
+    # being downloaded on the first user request.
+    PREFETCH_MODELS = 'false'
+
 [env]
   DEBUG = 'false'
   ENV = 'prod'
-  PREFETCH_MODELS = 'false'
   # Off because this machine is 2 GB and bge-m3 alone is ~2.3 GB of weights;
   # loading it here would OOM-kill the machine on the first query. It was
   # already effectively off — sentence-transformers was missing from the image,

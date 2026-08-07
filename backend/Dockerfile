@@ -46,11 +46,17 @@ USER uzlex
 # *before* COPY . . — this step only depends on the installed packages, not
 # the app source, so routine app-code changes reuse this layer from cache
 # instead of re-downloading ~7GB of models on every rebuild.
-ARG PREFETCH_MODELS=true
+# Defaults to false: fly.toml's [env] block sets runtime variables, which never
+# reach the build, so a `true` default here fires on every deploy regardless of
+# what [env] says -- baking 2.3 GB of weights into an image that may not want
+# them. Opt in through [build.args], or --build-arg on a plain docker build.
+ARG PREFETCH_MODELS=false
 ARG EMBEDDING_MODEL=BAAI/bge-m3
+ARG RERANKER_MODEL=BAAI/bge-reranker-v2-m3
 RUN if [ "$PREFETCH_MODELS" = "true" ]; then \
-        python -c "from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('${EMBEDDING_MODEL}', device='cpu')" ; \
+        python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; \
+SentenceTransformer('${EMBEDDING_MODEL}', device='cpu'); \
+CrossEncoder('${RERANKER_MODEL}', device='cpu', max_length=1024)" ; \
     else \
         echo "PREFETCH_MODELS=$PREFETCH_MODELS - skipping weight download; the first query pays the load" ; \
     fi
