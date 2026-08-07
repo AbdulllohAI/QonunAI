@@ -1,0 +1,50 @@
+# fly.toml app configuration file generated for uzlex-ai on 2026-07-29T18:34:14+05:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'uzlex-ai'
+primary_region = 'fra'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  DEBUG = 'false'
+  ENV = 'prod'
+  PREFETCH_MODELS = 'false'
+  TORCH_INDEX_URL = 'https://download.pytorch.org/whl/cpu'
+  UVICORN_WORKERS = '1'
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  # Keep one machine warm. Cold start here is not a normal container start: it
+  # loads bge-m3 before the first request can be served, so scale-to-zero turns
+  # the first question after any idle period into a 30s+ wait. That reads as a
+  # broken product to anyone evaluating it, and it also breaks unattended
+  # maintenance jobs, which find no running VM to exec into.
+  min_machines_running = 1
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'connections'
+    hard_limit = 50
+    soft_limit = 30
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '10s'
+    grace_period = '1m30s'
+    method = 'GET'
+    path = '/health'
+    protocol = 'http'
+
+[[vm]]
+  size = 'shared-cpu-4x'
+  memory = '2gb'
+  cpus = 4
+  memory_mb = 2048
+  processes = ['app']
