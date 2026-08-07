@@ -15,6 +15,13 @@ primary_region = 'fra'
     # being downloaded on the first user request.
     PREFETCH_MODELS = 'false'
 
+# WARNING: Fly secrets shadow this block. `flyctl secrets list` is the real
+# source of truth for any name that appears in both, and there is no warning
+# when one silently wins. RERANKER_ENABLED was set to 'false' here and stayed
+# true in the running process for exactly that reason -- which, once
+# sentence-transformers was installed, meant every query tried to load a 2.3 GB
+# cross-encoder on a 2 GB machine. Check `flyctl secrets list` before trusting
+# anything below.
 [env]
   DEBUG = 'false'
   ENV = 'prod'
