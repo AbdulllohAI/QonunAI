@@ -316,21 +316,32 @@ went from 0.694 to 0.774 and Recall@1 from 0.600 to 0.700.
 
 ### Why reranking is still off
 
-`bge-reranker-v2-m3` is a 568M-parameter cross-encoder scoring up to 30
-candidates at 1024 tokens each. On `shared-cpu-4x` that does not complete in
-interactive time — measured requests exceeded ten minutes and queued behind one
-another. It needs dedicated CPU (`performance-4x` or better), or a smaller
-candidate cap and sequence length. Turning it on without one of those changes
-makes the app unusable, so it stays off and the relevance threshold correctly
-does not apply.
+`bge-reranker-v2-m3` is a 568M-parameter cross-encoder that scores every
+candidate passage against the query. It was enabled and measured on
+`performance-4x` (4 **dedicated** cores, 8 GB):
+
+| Candidates × tokens | Latency |
+|---|---|
+| 30 × 1024 | 71 s |
+| 12 × 320 | > 200 s (timed out) |
+
+The ranking it produces is good — it puts Criminal Code art. 137 first with a
+score of 0.73 — but not at any latency a user will wait for. Cutting the work
+by ~25x did not produce a proportional speedup, which points at the per-forward
+cost on CPU rather than the amount of work queued.
+
+A cross-encoder this size needs a GPU, or a materially smaller reranker. It is
+off, `RERANK_CANDIDATE_CAP` and `RERANK_MAX_LENGTH` are now settings so the
+next attempt needs no code change, and the relevance threshold correctly does
+not apply while it is off.
 
 ### Current production configuration
 
 | Setting | Value | Why |
 |---|---|---|
-| VM | `shared-cpu-4x`, 8 GB | bge-m3 is ~2.3 GB resident, plus torch and the app |
+| VM | `performance-4x`, 8 GB | dedicated cores; bge-m3 is ~2.3 GB resident |
 | `DENSE_RETRIEVAL_ENABLED` | `true` | |
-| `RERANKER_ENABLED` | `false` | too slow on shared CPU (above) |
+| `RERANKER_ENABLED` | `false` | too slow even on dedicated CPU (above) |
 | `PREFETCH_MODELS` | `false` | baking weights in makes the image undeployable |
 | `UVICORN_WORKERS` | `1` | each worker would load its own copy of the model |
 
