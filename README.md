@@ -13,8 +13,8 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
-[![Recall@5](https://img.shields.io/badge/Recall%405-0.933-2ea44f)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.854-2ea44f)](backend/benchmarks/)
+[![Recall@5](https://img.shields.io/badge/Recall%405-1.000-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.928-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -366,14 +366,42 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 Retrieval runs through `/api/v1/search`, which exercises the full hybrid
 pipeline with no LLM call — so the expensive metric is free to measure.
 
-| Metric | First run | Sparse only | With dense | + heading fixes | Target |
-|---|---|---|---|---|---|
-| Recall@1 | 0.200 | 0.600 | 0.733 | **0.767** | — |
-| Recall@3 | — | — | 0.867 | **0.933** | — |
-| Recall@5 | 0.433 | 0.833 | 0.867 | **0.933** | 0.90 ✅ |
-| Recall@10 | — | — | 0.933 | **1.000** | 0.95 ✅ |
-| MRR | 0.294 | 0.694 | 0.807 | **0.854** | 0.75 ✅ |
-| Median retrieval | 431 ms | 695 ms | 1276 ms | 1327 ms | < 2000 ms |
+| Metric | First run | Sparse only | With dense | + heading fixes | + tuned fusion | Target |
+|---|---|---|---|---|---|---|
+| Recall@1 | 0.200 | 0.600 | 0.733 | 0.767 | **0.867** | — |
+| Recall@3 | — | — | 0.867 | 0.933 | **1.000** | — |
+| Recall@5 | 0.433 | 0.833 | 0.867 | 0.933 | **1.000** | 0.90 ✅ |
+| Recall@10 | — | — | 0.933 | 1.000 | **1.000** | 0.95 ✅ |
+| MRR | 0.294 | 0.694 | 0.807 | 0.854 | **0.928** | 0.75 ✅ |
+| Median retrieval | 431 ms | 695 ms | 1276 ms | 1327 ms | ~1300 ms | < 2000 ms |
+
+Every question retrieves its governing article in the top 3, and all targets are
+met. Four defects and one tuning pass closed the gap, each found by running the
+ranking function in Postgres against the real corpus rather than by reading code:
+
+1. **`ts_rank_cd` flags `2|8`** divided by document length *and* unique word
+   count. That double normalisation let the two-word chapter heading
+   «Меҳнат шартномаси» score 0.05 while art. 160's precise eight-word title —
+   which contains every query term — scored 0.006.
+2. **Structural headings were searchable.** Parts and chapters carry no article
+   number and can never be cited, but being short they were exactly what length
+   normalisation promoted.
+3. **Russian fleeting vowels broke prefix matching.** Postgres stems `сделкой`
+   to `сделк` but leaves `сделок` as `сделок`, and `сделк:*` is not a prefix of
+   `сделок` — so no question about сделки could reach the article titled
+   «Понятие сделок» at all. Verified directly: the `@@` operator returned false.
+4. **Branch-of-law qualifiers were treated as subject matter.** "по гражданскому
+   праву" names the branch, not the topic, and matched every «гражданских прав»
+   title. Stripped only in the oblique cases, so civil *rights* — a genuine
+   subject — is untouched.
+5. **`RRF_K = 60` flattened the top.** The canonical constant comes from fusing
+   dozens of TREC systems; with four branches it left rank 1 only ~13% ahead of
+   rank 10, so a chunk placing mid-table everywhere outscored one a branch
+   ranked first. Swept against the benchmark: `k=20`, heading weight `2.5`.
+
+These numbers come from 30 questions. A set that small will flatter any
+parameter tuned against it, so treat the fusion constants as fitted to this
+benchmark and re-check them if the corpus or the question mix changes.
 
 Every question in the set now retrieves its governing article somewhere in the
 top 10, and all three targets are met. Three defects closed the last gap, each

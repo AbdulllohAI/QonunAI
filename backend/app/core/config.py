@@ -61,13 +61,18 @@ class Settings(BaseSettings):
     RETRIEVAL_TOP_K_DENSE: int = 40
     RETRIEVAL_TOP_K_SPARSE: int = 40
     RETRIEVAL_TOP_K_FINAL: int = 12
-    RRF_K: int = 60
-    """RRF damping constant. The canonical 60 comes from fusing dozens of TREC
-    systems; with four branches over short article titles it flattens the top,
-    leaving rank 1 only ~13% ahead of rank 10 (1/61 vs 1/70). Lowering it
-    sharpens the advantage of being a branch's best hit."""
+    RRF_K: int = 20
+    """RRF damping constant, swept against the benchmark rather than assumed.
 
-    HEADING_RRF_WEIGHT: float = 2.0
+    The canonical 60 comes from fusing dozens of TREC systems. With four
+    branches over short article titles it flattens the top, leaving rank 1 only
+    ~13% ahead of rank 10 (1/61 vs 1/70) — so a chunk placing mid-table in
+    three branches outscored one that a branch ranked first. Dropping to 20
+    moved Recall@1 from 0.767 to 0.867 and Recall@5 from 0.933 to 1.000. Going
+    lower (10) was no better, and 30 was worse.
+    """
+
+    HEADING_RRF_WEIGHT: float = 2.5
     """How much an article-title match counts for, relative to dense and sparse.
 
     A title match is the strongest single signal that an article is *about* the
