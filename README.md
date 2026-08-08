@@ -12,8 +12,9 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-206%20passing-2ea44f)](backend/tests/)
+[![Tests](https://img.shields.io/badge/tests-225%20passing-2ea44f)](backend/tests/)
 [![Recall@5](https://img.shields.io/badge/Recall%405-0.833-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.774-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -48,7 +49,7 @@ generic "looks fine to me."
 |---|---|
 | 📌 **Citation-grounded Q&A** | Every legal statement carries an `[Sn]` tag resolving to a specific article. Uncited or unverifiable answers are rejected, not softened. |
 | 🔗 **Article-level deep links** | Citations open the *provision*, not the top of a 4 MB document — `lex.uz/docs/6257288#6259020` lands directly on 80-modda. See [Deep linking into lex.uz](#-deep-linking-into-lexuz). |
-| 🔍 **Hybrid retrieval** | Dense (`bge-m3` + pgvector HNSW) + sparse (per-language Postgres FTS) + article-title + exact-article lookup, fused by RRF and cross-encoder reranked. **The live deployment currently runs the sparse, title and exact branches only** — see [Deployment status](#-deployment-status). |
+| 🔍 **Hybrid retrieval** | Dense (`bge-m3` + pgvector HNSW) + sparse (per-language Postgres FTS) + article-title + exact-article lookup, fused by RRF. Cross-encoder reranking is implemented but off in the live deployment — see [Deployment status](#-deployment-status). |
 | ⚖️ **Legal hierarchy reasoning** | Constitution > Codes > Laws > Decrees, then *lex specialis*, then *lex posterior* — computed deterministically from adoption dates and act type, not left to the model to reason about on the fly. |
 | 🔗 **Cross-reference expansion** | "…in the cases provided for by Article 333 of this Code" automatically pulls Article 333 into context. |
 | 📄 **Document analysis** | Contracts segmented clause-by-clause, screened against mandatory Uzbek norms by both regex red-flags and an LLM compliance pass, with risk levels and concrete redrafting suggestions. |
@@ -255,7 +256,7 @@ and time-to-first-token rather than in the retriever.
 cd backend && pytest tests/ -v
 ```
 
-206 unit tests, no database or network required — verified passing. They cover
+225 unit tests, no database or network required — verified passing. They cover
 the places where a silent regression is most damaging: transliteration (halves
 Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
 validation (hallucinations reaching users), the hierarchy-of-force rules
@@ -264,34 +265,39 @@ wrong article).
 
 ## 🚧 Deployment status
 
-The live app at `uzlex-ai.fly.dev` runs a **reduced** version of the pipeline
-described above. Dense retrieval and cross-encoder reranking are switched off.
+The live app runs dense retrieval, sparse full-text search, article-title
+search and exact-article lookup, fused by RRF. **Cross-encoder reranking is
+implemented but switched off** — see below.
 
-The honest history: `sentence-transformers` was never listed in
-`requirements.txt`. Every chunk in the corpus carries a real `bge-m3` vector —
-1024-dim, unit-norm, 11,042 distinct across 11,538 chunks — because ingestion
-embedded them elsewhere. But the *query* side could not embed, so the dense
-branch raised on every single request, the retriever quietly fused three
-branches instead of four, and the reranker never ran at all. Nothing said so:
-`/health` reported `embedded_chunks: 11538` and a green status throughout,
-because that field counts documents and cannot detect a broken query path.
+For most of this project's life dense retrieval was silently dead.
+`sentence-transformers` was never listed in `requirements.txt`, so every chunk
+carried a real `bge-m3` vector (1024-dim, unit-norm, 11,042 distinct across
+11,538 chunks) while the *query* side could not embed at all. The dense branch
+raised on every request, the retriever fused three branches instead of four,
+and the reranker never loaded. Nothing reported it: `/health` showed
+`embedded_chunks: 11538` and a green status throughout, because that field
+counts documents and cannot detect a broken query path.
 
-**The benchmark numbers below were measured in that state** — Recall@5 = 0.833
-on sparse, title and exact matching alone. Turning dense retrieval on should
-improve them, particularly on the remaining failures, which are all questions
-whose governing article *paraphrases* the query instead of sharing its
-vocabulary — exactly what dense retrieval is for. That improvement is
-unmeasured, and is not claimed here until it is.
+Three further defects were hiding behind that one, each only visible once the
+one in front of it was fixed:
 
-Why it is still off: `bge-m3` and `bge-reranker-v2-m3` are ~2.3 GB of weights
-each, and the machines are 2 GB. Enabling it without more memory OOMs on the
-first query. It is now off *deliberately* — `DENSE_RETRIEVAL_ENABLED=false`,
-with `/health` reporting `dense_retrieval: false` and an overall `degraded`
-status — rather than off by accident and reporting healthy.
+1. **torch was pinned below 2.6.** `transformers` refuses `torch.load` on older
+   versions (CVE-2025-32434) and bge-m3 ships `.bin` weights, so the model
+   would have failed to load regardless of available memory.
+2. **Baking the weights into the image made it undeployable.** A 4.8 GB image
+   exceeds Fly's machine-update timeout; the API returns HTTP 408, `flyctl
+   deploy` swallows it and reports success, and the machines keep running the
+   previous image. Weights are now downloaded at runtime and the startup warmup
+   runs in the background so the port binds immediately.
+3. **The relevance threshold silently capped recall at three results.**
+   `MIN_RELEVANCE_SCORE` is calibrated for the cross-encoder's sigmoid output,
+   but the score falls back to the RRF fused value (~0.016–0.065), which can
+   never clear a 0.25 threshold. With the reranker off, every candidate was
+   discarded on every query and a three-result fallback took over.
 
-### What this actually costs the product
+### What dense retrieval bought
 
-Cross-language retrieval is the casualty, and the corpus makes that expensive:
+Cross-language retrieval, which the corpus makes essential:
 
 | Script / language | Chunks | Share |
 |---|---|---|
@@ -299,31 +305,38 @@ Cross-language retrieval is the casualty, and the corpus makes that expensive:
 | Russian | 4,927 | 43% |
 | Uzbek Latin | 707 | 6% |
 
-Latin↔Cyrillic is bridged lexically by the transliteration layer, so Latin-script
-queries do reach the Cyrillic material. **Uzbek↔Russian is bridged only by the
-shared embedding space** — nothing lexical connects `odam oʻgʻirlash` to
-`похищение человека`. With dense retrieval off, a Latin-script Uzbek query
-cannot reach 43% of the corpus at all.
+Latin↔Cyrillic is bridged lexically by the transliteration layer. **Uzbek↔Russian
+is bridged only by the shared embedding space** — nothing lexical connects
+`odam oʻgʻirlash` to `похищение человека`.
 
-That is not hypothetical. Asked *"Odam oʻgʻirlash uchun qanday jazo
-belgilangan?"*, the live app correctly refuses to answer rather than inventing
-one — the citation guarantee holds — but it never finds Criminal Code art. 137,
-which the equivalent Russian query returns as its top hit in 740 ms.
+Concretely, *"Odam oʻgʻirlash uchun qanday jazo belgilangan?"* previously
+returned four results and never reached Criminal Code art. 137. It now returns
+eleven and ranks art. 137 by embedding similarity (0.60). Benchmark-wide, MRR
+went from 0.694 to 0.774 and Recall@1 from 0.600 to 0.700.
 
-### Enabling it
+### Why reranking is still off
 
-```bash
-flyctl scale memory 8192 -a uzlex-ai
-```
+`bge-reranker-v2-m3` is a 568M-parameter cross-encoder scoring up to 30
+candidates at 1024 tokens each. On `shared-cpu-4x` that does not complete in
+interactive time — measured requests exceeded ten minutes and queued behind one
+another. It needs dedicated CPU (`performance-4x` or better), or a smaller
+candidate cap and sequence length. Turning it on without one of those changes
+makes the app unusable, so it stays off and the relevance threshold correctly
+does not apply.
 
-Then set `PREFETCH_MODELS = 'true'` under `[build.args]`, set
-`DENSE_RETRIEVAL_ENABLED = 'true'` in `[env]`, and redeploy. Prefetching matters:
-without it the weights download on the first user request instead of baking into
-the image.
+### Current production configuration
 
-`RERANKER_ENABLED` is a **Fly secret**, and secrets silently shadow `fly.toml`
-`[env]` — set it with `flyctl secrets set RERANKER_ENABLED=true`, not by editing
-the file. Check `flyctl secrets list` before trusting any value in `[env]`.
+| Setting | Value | Why |
+|---|---|---|
+| VM | `shared-cpu-4x`, 8 GB | bge-m3 is ~2.3 GB resident, plus torch and the app |
+| `DENSE_RETRIEVAL_ENABLED` | `true` | |
+| `RERANKER_ENABLED` | `false` | too slow on shared CPU (above) |
+| `PREFETCH_MODELS` | `false` | baking weights in makes the image undeployable |
+| `UVICORN_WORKERS` | `1` | each worker would load its own copy of the model |
+
+`RERANKER_ENABLED` and the rate limits are **Fly secrets**, and secrets silently
+shadow `fly.toml [env]`. Check `flyctl secrets list` before trusting any value
+in the committed config.
 
 ## 📊 Retrieval benchmark
 
@@ -341,12 +354,18 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 Retrieval runs through `/api/v1/search`, which exercises the full hybrid
 pipeline with no LLM call — so the expensive metric is free to measure.
 
-| Metric | First run | Current | Target |
-|---|---|---|---|
-| Recall@1 | 0.200 | **0.600** | — |
-| Recall@5 | 0.433 | **0.833** | 0.90 |
-| MRR | 0.294 | **0.694** | 0.75 |
-| Median retrieval | 431 ms | 695 ms | < 2000 ms |
+| Metric | First run | Sparse only | With dense | Target |
+|---|---|---|---|---|
+| Recall@1 | 0.200 | 0.600 | **0.700** | — |
+| Recall@5 | 0.433 | 0.833 | **0.833** | 0.90 |
+| Recall@10 | — | — | **0.900** | 0.95 |
+| MRR | 0.294 | 0.694 | **0.774** | 0.75 ✅ |
+| Median retrieval | 431 ms | 695 ms | 1556 ms | < 2000 ms |
+
+Dense retrieval bought ranking quality rather than raw coverage: Recall@5 is
+unchanged, but the governing article is now first for 70% of questions instead
+of 60%, and MRR clears its target. It also restored cross-language retrieval —
+see [Deployment status](#-deployment-status).
 
 Three defects closed that gap, each found by measurement rather than reading code:
 
