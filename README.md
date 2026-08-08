@@ -13,8 +13,8 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-225%20passing-2ea44f)](backend/tests/)
-[![Recall@5](https://img.shields.io/badge/Recall%405-0.833-2ea44f)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.774-2ea44f)](backend/benchmarks/)
+[![Recall@5](https://img.shields.io/badge/Recall%405-0.867-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.807-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -312,7 +312,7 @@ is bridged only by the shared embedding space** — nothing lexical connects
 Concretely, *"Odam oʻgʻirlash uchun qanday jazo belgilangan?"* previously
 returned four results and never reached Criminal Code art. 137. It now returns
 eleven and ranks art. 137 by embedding similarity (0.60). Benchmark-wide, MRR
-went from 0.694 to 0.774 and Recall@1 from 0.600 to 0.700.
+went from 0.694 to 0.807 and Recall@1 from 0.600 to 0.733.
 
 ### Why reranking is still off
 
@@ -368,11 +368,21 @@ pipeline with no LLM call — so the expensive metric is free to measure.
 
 | Metric | First run | Sparse only | With dense | Target |
 |---|---|---|---|---|
-| Recall@1 | 0.200 | 0.600 | **0.700** | — |
-| Recall@5 | 0.433 | 0.833 | **0.833** | 0.90 |
-| Recall@10 | — | — | **0.900** | 0.95 |
-| MRR | 0.294 | 0.694 | **0.774** | 0.75 ✅ |
-| Median retrieval | 431 ms | 695 ms | 1556 ms | < 2000 ms |
+| Recall@1 | 0.200 | 0.600 | **0.733** | — |
+| Recall@3 | — | — | **0.867** | — |
+| Recall@5 | 0.433 | 0.833 | **0.867** | 0.90 |
+| Recall@10 | — | — | **0.933** | 0.95 |
+| MRR | 0.294 | 0.694 | **0.807** | 0.75 ✅ |
+| Median retrieval | 431 ms | 695 ms | 1276 ms | < 2000 ms |
+
+Dense retrieval bought ranking quality more than raw coverage: the governing
+article is first for 73% of questions against 60% without it, and MRR clears
+its target. It also restored cross-language retrieval — see
+[Deployment status](#-deployment-status).
+
+Run-to-run variation on a live service is real; an earlier run of the same
+configuration scored MRR 0.774 / Recall@1 0.700 against a colder embedding
+cache. Treat single-run differences under ~0.03 as noise.
 
 Dense retrieval bought ranking quality rather than raw coverage: Recall@5 is
 unchanged, but the governing article is now first for 70% of questions instead
