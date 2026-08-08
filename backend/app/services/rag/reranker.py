@@ -37,7 +37,7 @@ class Reranker:
                             CrossEncoder,
                             settings.RERANKER_MODEL,
                             device=settings.EMBEDDING_DEVICE,
-                            max_length=1024,
+                            max_length=settings.RERANK_MAX_LENGTH,
                         )
                     except Exception as exc:
                         # Degrade to fusion-only ranking rather than failing the

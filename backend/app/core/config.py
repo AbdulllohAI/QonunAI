@@ -68,7 +68,22 @@ class Settings(BaseSettings):
     # many of the *already RRF-ranked* candidates it has to score bounds that
     # cost without touching recall, since the ones cut were the fusion's own
     # lowest-ranked guesses.
-    RERANK_CANDIDATE_CAP: int = 30
+    RERANK_CANDIDATE_CAP: int = 12
+    """How many fused candidates the cross-encoder scores.
+
+    Cost is linear in this and quadratic in RERANK_MAX_LENGTH. At 30 candidates
+    and 1024 tokens, a single query took 71s on 4 dedicated cores -- correct
+    results, unusable latency.
+    """
+
+    RERANK_MAX_LENGTH: int = 320
+    """Token budget per candidate for the cross-encoder.
+
+    The pair text leads with the citation and heading, which is what most
+    relevance judgements actually turn on, so truncating the body is cheap in
+    quality and very expensive to avoid: attention is quadratic, making 1024
+    tokens ~10x the cost of 320.
+    """
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     RERANKER_ENABLED: bool = True
 
