@@ -330,16 +330,17 @@ score of 0.73 — but not at any latency a user will wait for. Cutting the work
 by ~25x did not produce a proportional speedup, which points at the per-forward
 cost on CPU rather than the amount of work queued.
 
-A cross-encoder this size needs a GPU, or a materially smaller reranker. It is
-off, `RERANK_CANDIDATE_CAP` and `RERANK_MAX_LENGTH` are now settings so the
-next attempt needs no code change, and the relevance threshold correctly does
-not apply while it is off.
+A cross-encoder this size needs a GPU, or a materially smaller reranker such as
+`bge-reranker-base` (278M). It is off, the machines are back on `shared-cpu-4x`
+since the dedicated cores bought nothing without it, and `RERANK_CANDIDATE_CAP`
+and `RERANK_MAX_LENGTH` are now settings so the next attempt needs no code
+change. The relevance threshold correctly does not apply while it is off.
 
 ### Current production configuration
 
 | Setting | Value | Why |
 |---|---|---|
-| VM | `performance-4x`, 8 GB | dedicated cores; bge-m3 is ~2.3 GB resident |
+| VM | `shared-cpu-4x`, 8 GB | dense retrieval embeds one short query per request; bge-m3 is ~2.3 GB resident |
 | `DENSE_RETRIEVAL_ENABLED` | `true` | |
 | `RERANKER_ENABLED` | `false` | too slow even on dedicated CPU (above) |
 | `PREFETCH_MODELS` | `false` | baking weights in makes the image undeployable |

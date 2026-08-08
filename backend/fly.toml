@@ -62,12 +62,12 @@ primary_region = 'fra'
     protocol = 'http'
 
 [[vm]]
-  # performance-4x, not shared: bge-reranker-v2-m3 is a 568M cross-encoder
-  # scoring up to RERANK_CANDIDATE_CAP passages at 1024 tokens on every query.
-  # On shared-cpu-4x that did not complete in interactive time — requests ran
-  # past ten minutes and queued behind each other. Dedicated cores are what
-  # make reranking viable at all.
-  size = 'performance-4x'
+  # shared-cpu-4x is enough for what actually runs: dense retrieval embeds one
+  # short query per request (~1.5s end to end). Dedicated cores were tried for
+  # the cross-encoder reranker and did not help enough to matter -- 12
+  # candidates at 320 tokens still exceeded 200s -- so the reranker is off and
+  # the premium bought nothing. Still 8 GB: bge-m3 is ~2.3 GB resident.
+  size = 'shared-cpu-4x'
   # 8 GB, not 2: bge-m3 (~2.3 GB) and bge-reranker-v2-m3 (~2.3 GB) are both
   # held in memory for the lifetime of the process, on top of torch and the
   # app itself. Declared here rather than set with `flyctl scale memory`,
