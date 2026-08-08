@@ -12,9 +12,9 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-225%20passing-2ea44f)](backend/tests/)
-[![Recall@5](https://img.shields.io/badge/Recall%405-0.867-2ea44f)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.807-2ea44f)](backend/benchmarks/)
+[![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
+[![Recall@5](https://img.shields.io/badge/Recall%405-0.933-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.854-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -256,7 +256,7 @@ and time-to-first-token rather than in the retriever.
 cd backend && pytest tests/ -v
 ```
 
-225 unit tests, no database or network required — verified passing. They cover
+235 unit tests, no database or network required — verified passing. They cover
 the places where a silent regression is most damaging: transliteration (halves
 Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
 validation (hallucinations reaching users), the hierarchy-of-force rules
@@ -366,14 +366,34 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 Retrieval runs through `/api/v1/search`, which exercises the full hybrid
 pipeline with no LLM call — so the expensive metric is free to measure.
 
-| Metric | First run | Sparse only | With dense | Target |
-|---|---|---|---|---|
-| Recall@1 | 0.200 | 0.600 | **0.733** | — |
-| Recall@3 | — | — | **0.867** | — |
-| Recall@5 | 0.433 | 0.833 | **0.867** | 0.90 |
-| Recall@10 | — | — | **0.933** | 0.95 |
-| MRR | 0.294 | 0.694 | **0.807** | 0.75 ✅ |
-| Median retrieval | 431 ms | 695 ms | 1276 ms | < 2000 ms |
+| Metric | First run | Sparse only | With dense | + heading fixes | Target |
+|---|---|---|---|---|---|
+| Recall@1 | 0.200 | 0.600 | 0.733 | **0.767** | — |
+| Recall@3 | — | — | 0.867 | **0.933** | — |
+| Recall@5 | 0.433 | 0.833 | 0.867 | **0.933** | 0.90 ✅ |
+| Recall@10 | — | — | 0.933 | **1.000** | 0.95 ✅ |
+| MRR | 0.294 | 0.694 | 0.807 | **0.854** | 0.75 ✅ |
+| Median retrieval | 431 ms | 695 ms | 1276 ms | 1327 ms | < 2000 ms |
+
+Every question in the set now retrieves its governing article somewhere in the
+top 10, and all three targets are met. Three defects closed the last gap, each
+found by running the ranking function in Postgres against the real corpus
+rather than by reading code:
+
+1. **`ts_rank_cd` flags `2|8`** divided by document length *and* unique word
+   count. That double normalisation let the two-word chapter heading
+   «Меҳнат шартномаси» score 0.05 while art. 160's precise eight-word title —
+   which contains every query term — scored 0.006.
+2. **Structural headings were searchable.** Parts and chapters carry no article
+   number and can never be cited, but being short they were exactly what length
+   normalisation promoted.
+3. **Russian fleeting vowels broke prefix matching.** Postgres stems `сделкой`
+   to `сделк` but leaves `сделок` as `сделок`, and `сделк:*` is not a prefix of
+   `сделок` — so no question about сделки could reach the article titled
+   «Понятие сделок» at all. Verified directly: the `@@` operator returned false.
+
+Run-to-run variation on a live service is real; treat single-run differences
+under ~0.03 as noise.
 
 Dense retrieval bought ranking quality more than raw coverage: the governing
 article is first for 73% of questions against 60% without it, and MRR clears
