@@ -10,10 +10,12 @@ primary_region = 'fra'
   dockerfile = 'Dockerfile'
 
   [build.args]
-    # Build-time, unlike the [env] block below. Set to 'true' together with
-    # DENSE_RETRIEVAL_ENABLED so the weights bake into the image instead of
-    # being downloaded on the first user request.
-    PREFETCH_MODELS = 'true'
+    # Deliberately 'false'. Baking bge-m3 and the reranker into the image
+    # produced a 4.8 GB image, and Fly's machine-update call times out pulling
+    # it -- HTTP 408, which `flyctl deploy` swallows while still reporting
+    # success, so the machines silently keep running the previous image. The
+    # weights are downloaded at runtime instead; startup does not block on it.
+    PREFETCH_MODELS = 'false'
 
 # WARNING: Fly secrets shadow this block. `flyctl secrets list` is the real
 # source of truth for any name that appears in both, and there is no warning

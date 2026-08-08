@@ -50,20 +50,34 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.warning("migration step failed", extra={"error": str(exc)})
 
-    # Warm the embedding model so the first user query does not pay the load.
-    try:
-        await embedder.embed_texts(["warmup"], use_cache=False)
-        log.info("embedding model warm")
-    except Exception as exc:
-        # error, not warning: if the warmup cannot embed, *no* query can, and
-        # the service will answer every question from keyword search while
-        # still looking healthy. This line failing is a production incident.
-        log.error(
-            "embedding_warmup_failed_dense_retrieval_disabled",
-            extra={"error": str(exc), "model": settings.EMBEDDING_MODEL},
-        )
+    # Warm the embedding model so the first user query does not pay the load —
+    # in the background, deliberately.
+    #
+    # Awaiting it here would hold the port closed until bge-m3 is resident, and
+    # when the weights are not baked into the image that means waiting on a
+    # ~2.3 GB download. The platform health check starts probing well before
+    # that finishes, so a blocking warmup turns a slow first request into a
+    # failed deploy. Booting immediately and degrading is the better trade:
+    # /health reports `dense_retrieval: false` until the model is ready, and
+    # queries in the meantime are served by the keyword branches.
+    async def _warm() -> None:
+        try:
+            await embedder.embed_texts(["warmup"], use_cache=False)
+            log.info("embedding_model_warm")
+        except Exception as exc:
+            # error, not warning: if the warmup cannot embed, *no* query can,
+            # and the service answers every question from keyword search while
+            # still looking healthy. This failing is a production incident.
+            log.error(
+                "embedding_warmup_failed_dense_retrieval_disabled",
+                extra={"error": str(exc), "model": settings.EMBEDDING_MODEL},
+            )
+
+    warmup_task = asyncio.create_task(_warm())
 
     yield
+
+    warmup_task.cancel()
 
     await embedder.close()
     await engine.dispose()
