@@ -13,7 +13,7 @@ primary_region = 'fra'
     # Build-time, unlike the [env] block below. Set to 'true' together with
     # DENSE_RETRIEVAL_ENABLED so the weights bake into the image instead of
     # being downloaded on the first user request.
-    PREFETCH_MODELS = 'false'
+    PREFETCH_MODELS = 'true'
 
 # WARNING: Fly secrets shadow this block. `flyctl secrets list` is the real
 # source of truth for any name that appears in both, and there is no warning
@@ -25,19 +25,11 @@ primary_region = 'fra'
 [env]
   DEBUG = 'false'
   ENV = 'prod'
-  # Off because this machine is 2 GB and bge-m3 alone is ~2.3 GB of weights;
-  # loading it here would OOM-kill the machine on the first query. It was
-  # already effectively off — sentence-transformers was missing from the image,
-  # so the dense branch raised on every request and nothing said so. This makes
-  # that state deliberate and visible: /health now reports `dense_retrieval:
-  # false` and an overall `degraded` status while it stays this way.
-  #
-  # To turn dense retrieval on: `flyctl scale memory 8192` (bge-m3 and
-  # bge-reranker-v2-m3 are ~2.3 GB each, plus runtime), set PREFETCH_MODELS to
-  # 'true' so the weights bake into the image instead of downloading on first
-  # request, then set this to 'true' and deploy.
-  DENSE_RETRIEVAL_ENABLED = 'false'
-  RERANKER_ENABLED = 'false'
+  # On. Requires the 8 GB [[vm]] below: bge-m3 and bge-reranker-v2-m3 are
+  # ~2.3 GB of weights each and both are resident at once, so a 2 GB machine
+  # OOMs on the first query. RERANKER_ENABLED is deliberately absent here --
+  # it exists as a Fly secret, which shadows this block (see warning above).
+  DENSE_RETRIEVAL_ENABLED = 'true'
   TORCH_INDEX_URL = 'https://download.pytorch.org/whl/cpu'
   UVICORN_WORKERS = '1'
 
@@ -69,7 +61,12 @@ primary_region = 'fra'
 
 [[vm]]
   size = 'shared-cpu-4x'
-  memory = '2gb'
+  # 8 GB, not 2: bge-m3 (~2.3 GB) and bge-reranker-v2-m3 (~2.3 GB) are both
+  # held in memory for the lifetime of the process, on top of torch and the
+  # app itself. Declared here rather than set with `flyctl scale memory`,
+  # because a deploy reapplies this file and would silently scale it back down.
+  # Keep UVICORN_WORKERS at 1 -- each worker loads its own copy of both models.
+  memory = '8gb'
   cpus = 4
-  memory_mb = 2048
+  memory_mb = 8192
   processes = ['app']

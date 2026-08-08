@@ -29,7 +29,12 @@ COPY requirements.txt .
 # https://download.pytorch.org/whl/cu124) for a GPU deployment; the compose
 # file wires this to the TORCH_INDEX_URL env var.
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir torch==2.5.1 --index-url ${TORCH_INDEX_URL} \
+# torch >= 2.6 is a hard floor, not a preference. transformers refuses to call
+# torch.load on anything older (CVE-2025-32434), and bge-m3 ships .bin weights
+# rather than safetensors, so on 2.5.1 the model raises at load time no matter
+# how much memory the host has. Pinning below this silently disables dense
+# retrieval — which is exactly what happened here.
+RUN pip install --no-cache-dir torch==2.6.0 --index-url ${TORCH_INDEX_URL} \
     && pip install --no-cache-dir -r requirements.txt
 
 # Create the user and hand over ownership *before* downloading the model
