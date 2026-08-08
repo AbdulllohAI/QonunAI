@@ -62,6 +62,18 @@ class Settings(BaseSettings):
     RETRIEVAL_TOP_K_SPARSE: int = 40
     RETRIEVAL_TOP_K_FINAL: int = 12
     RRF_K: int = 60
+    """RRF damping constant. The canonical 60 comes from fusing dozens of TREC
+    systems; with four branches over short article titles it flattens the top,
+    leaving rank 1 only ~13% ahead of rank 10 (1/61 vs 1/70). Lowering it
+    sharpens the advantage of being a branch's best hit."""
+
+    HEADING_RRF_WEIGHT: float = 2.0
+    """How much an article-title match counts for, relative to dense and sparse.
+
+    A title match is the strongest single signal that an article is *about* the
+    question rather than merely mentioning it, but a chunk that places
+    mid-table in all three branches can still outscore one that a single branch
+    ranks first."""
     # Fusion sees the full dense+sparse pool (up to 80 candidates) so RRF has
     # real breadth to rank over, but the cross-encoder reranker is by far the
     # most expensive step on CPU (a forward pass per candidate) — capping how

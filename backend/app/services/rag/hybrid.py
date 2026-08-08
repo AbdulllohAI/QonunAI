@@ -47,14 +47,6 @@ from app.services.rag.vector_store import vector_store
 
 log = get_logger(__name__)
 
-#: How much an article-title match counts for in RRF, relative to the dense and
-#: sparse lists at 1.0. Set from benchmark measurement, not intuition: title
-#: matches were the missing signal in nearly every observed failure, but pushing
-#: this much higher starts promoting articles whose title shares a common word
-#: with the question and whose body is irrelevant.
-HEADING_RRF_WEIGHT = 2.0
-
-
 def _to_retrieved(chunk: Chunk, act: LegalAct, *, sparse: float = 0.0) -> RetrievedChunk:
     return RetrievedChunk(
         chunk_id=chunk.id,
@@ -316,7 +308,7 @@ class HybridRetriever:
             existing = merged.get(chunk.chunk_id)
             if existing is None:
                 merged[chunk.chunk_id] = chunk
-            scores[chunk.chunk_id] += HEADING_RRF_WEIGHT / (k + rank)
+            scores[chunk.chunk_id] += settings.HEADING_RRF_WEIGHT / (k + rank)
 
         for chunk_id, score in scores.items():
             merged[chunk_id].fused_score = score
