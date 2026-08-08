@@ -143,7 +143,20 @@ class HybridRetriever:
         candidates = candidates[: settings.RERANK_CANDIDATE_CAP]
 
         reranked = await reranker.rerank(query, candidates, top_k)
-        reranked = [c for c in reranked if c.score >= settings.MIN_RELEVANCE_SCORE] or reranked[:3]
+        # Only threshold on real cross-encoder scores. MIN_RELEVANCE_SCORE is
+        # calibrated against the reranker's sigmoid output, but `score` falls
+        # back to the RRF fused score, which is ~1/(60+rank) — never above
+        # 0.065, and so never above a 0.25 threshold. With the reranker off
+        # that filter therefore discarded *every* candidate on *every* query
+        # and silently fell through to `reranked[:3]`, capping recall at three
+        # results. An RRF score is a rank artefact, not a relevance
+        # probability; there is no meaningful threshold to apply to it.
+        if any(c.rerank_score is not None for c in reranked):
+            reranked = [
+                c for c in reranked if c.score >= settings.MIN_RELEVANCE_SCORE
+            ] or reranked[:3]
+        else:
+            reranked = reranked[:top_k]
 
         # Re-pin: reranking can bury an explicitly requested article.
         reranked = self._pin_exact(pinned, reranked) + [
