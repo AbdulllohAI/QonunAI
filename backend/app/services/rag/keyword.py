@@ -70,10 +70,14 @@ def build_tsquery(query: str, language: Language) -> tuple[str, str]:
     exact-token query misses "shartnomani" when the user typed "shartnoma".
     """
     config = language.pg_text_config
-    # Postgres stems Russian and English itself; for those, adding our own
-    # truncated variants would only add noise. Uzbek uses 'simple' (no stemmer),
-    # which is where the suffix problem lives.
-    needs_stemming = config == "simple"
+    # Uzbek uses 'simple' (no stemmer), so it needs our own truncated variants
+    # for the suffix problem. Russian has a real stemmer but still needs them,
+    # for a narrower reason: the snowball stemmer does not unify fleeting-vowel
+    # alternations. "сделкой" stems to 'сделк' while "сделок" stays 'сделок',
+    # and 'сделк':* is not a prefix of 'сделок' — so a question about сделки
+    # could not match the article titled "Понятие сделок" at all. English is
+    # left to Postgres, which has no equivalent alternation.
+    needs_stemming = config in ("simple", "russian")
 
     tokens: list[str] = []
     for variant in script_variants(query):
@@ -149,13 +153,23 @@ class KeywordSearcher:
         config, tsquery = build_tsquery(query, language)
         ts = func.to_tsquery(config, tsquery)
         heading_tsv = func.to_tsvector(config, func.coalesce(Chunk.heading, ""))
-        # 2 = divide by document length, 8 = divide by unique word count.
-        rank = func.ts_rank_cd(heading_tsv, ts, 2 | 8).label("rank")
+        # 2 = divide by document length. Dividing by unique word count as well
+        # (flag 8) double-penalises длинные titles and let two-word structural
+        # headings outrank the precise article title: for "employee-initiated
+        # termination", the chapter heading "Меҳнат шартномаси" scored 0.05
+        # while art. 160's own title — which contains every query term —
+        # scored 0.006, eight times lower, and never surfaced.
+        rank = func.ts_rank_cd(heading_tsv, ts, 2).label("rank")
 
         stmt: Select = (
             select(Chunk, LegalAct, rank)
             .join(LegalAct, LegalAct.id == Chunk.act_id)
             .where(Chunk.heading.isnot(None))
+            # Structural headings (parts, chapters) carry no article number and
+            # can never be cited as authority, so they are pure noise here —
+            # and being short, length normalisation ranked them above the
+            # articles they contain.
+            .where(Chunk.article_number.isnot(None))
             .where(heading_tsv.op("@@")(ts))
         )
         stmt = self._filters(stmt, languages, act_types, act_ids, in_force_only)
