@@ -62,12 +62,18 @@ primary_region = 'fra'
     protocol = 'http'
 
 [[vm]]
-  size = 'shared-cpu-4x'
+  # performance-4x, not shared: bge-reranker-v2-m3 is a 568M cross-encoder
+  # scoring up to RERANK_CANDIDATE_CAP passages at 1024 tokens on every query.
+  # On shared-cpu-4x that did not complete in interactive time — requests ran
+  # past ten minutes and queued behind each other. Dedicated cores are what
+  # make reranking viable at all.
+  size = 'performance-4x'
   # 8 GB, not 2: bge-m3 (~2.3 GB) and bge-reranker-v2-m3 (~2.3 GB) are both
   # held in memory for the lifetime of the process, on top of torch and the
   # app itself. Declared here rather than set with `flyctl scale memory`,
   # because a deploy reapplies this file and would silently scale it back down.
-  # Keep UVICORN_WORKERS at 1 -- each worker loads its own copy of both models.
+  # Keep UVICORN_WORKERS at 1 -- each worker loads its own copy of both models,
+  # and with the reranker on that is ~4.6 GB per worker.
   memory = '8gb'
   cpus = 4
   memory_mb = 8192

@@ -52,6 +52,18 @@ class Reranker:
                         self._unavailable = True
         return self._model
 
+    async def warm(self) -> bool:
+        """Load the cross-encoder ahead of the first request.
+
+        Left lazy, the ~2.3 GB load happens inside whichever user request
+        arrives first, and that takes longer than Fly's proxy will wait — the
+        request dies with a 502 rather than merely being slow. Returns whether
+        the model is usable, so callers can log the outcome.
+        """
+        if not settings.RERANKER_ENABLED:
+            return False
+        return await self._get_model() is not None
+
     async def rerank(
         self, query: str, chunks: Sequence[RetrievedChunk], top_k: int
     ) -> list[RetrievedChunk]:

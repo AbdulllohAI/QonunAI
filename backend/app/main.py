@@ -20,6 +20,7 @@ from app.db.session import SessionLocal, engine
 from app.schemas.common import HealthResponse
 from app.services.llm import LLMProviderError, llm_router
 from app.services.rag.embedder import embedder
+from app.services.rag.reranker import reranker
 
 VERSION = "1.0.0"
 log = get_logger(__name__)
@@ -64,6 +65,12 @@ async def lifespan(app: FastAPI):
         try:
             await embedder.embed_texts(["warmup"], use_cache=False)
             log.info("embedding_model_warm")
+            # Warm the cross-encoder too. Left lazy, its first load happens
+            # inside whichever user request arrives first, and pulling ~2.3 GB
+            # takes longer than Fly's proxy will wait — that request dies with
+            # a 502 rather than merely being slow.
+            if await reranker.warm():
+                log.info("reranker_model_warm")
         except Exception as exc:
             # error, not warning: if the warmup cannot embed, *no* query can,
             # and the service answers every question from keyword search while
