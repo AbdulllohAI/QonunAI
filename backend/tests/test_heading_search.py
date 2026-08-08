@@ -52,3 +52,43 @@ def test_uzbek_query_reaches_cyrillic_corpus():
     terms = _terms("Xodim o'z tashabbusi bilan mehnat shartnomasini bekor qiladi", Language.UZ_LATN)
     assert any("ходим".startswith(t) for t in terms), sorted(terms)
     assert any("ташаббусига".startswith(t) for t in terms), sorted(terms)
+
+
+# ------------------------------------------------- branch-of-law framing
+
+def test_branch_of_law_qualifier_is_dropped():
+    """"по гражданскому праву" names the branch, not the subject. Left in, it
+    matched every "…гражданских прав" title and buried art. 101 "Понятие
+    сделок"."""
+    from app.services.rag.query_prep import content_tokens
+
+    assert content_tokens("Что признаётся сделкой по гражданскому праву?", "ru") == ["сделкой"]
+
+
+def test_civil_rights_are_a_subject_not_framing():
+    """Different adjective endings: "гражданских прав" is what the question is
+    about, and stripping it would break every rights question."""
+    from app.services.rag.query_prep import content_tokens
+
+    kept = content_tokens("Какие способы защиты гражданских прав?", "ru")
+    assert "гражданских" in kept and "прав" in kept
+
+
+def test_nominative_civil_rights_kept():
+    from app.services.rag.query_prep import content_tokens
+
+    assert "гражданские" in content_tokens("гражданские права человека", "ru")
+
+
+def test_criminal_law_qualifier_also_dropped():
+    from app.services.rag.query_prep import content_tokens
+
+    assert content_tokens("Что признаётся кражей по уголовному праву?", "ru") == ["кражей"]
+
+
+def test_uzbek_queries_are_untouched():
+    from app.services.rag.query_prep import content_tokens
+
+    assert content_tokens("Mehnat shartnomasi qanday bekor qilinadi", "uz-Latn") == [
+        "mehnat", "shartnomasi", "bekor",
+    ]

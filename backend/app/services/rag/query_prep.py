@@ -92,6 +92,27 @@ def normalise_token(raw: str) -> str:
     return lowered
 
 
+# "по гражданскому праву", "нормы уголовного права" — these name the *branch
+# of law* the question sits in, not its subject. Left in, they match every
+# article title containing "гражданских прав" and bury the one that answers the
+# question: for "Что признаётся сделкой по гражданскому праву?" the top hits
+# were all "…гражданских прав" while art. 101 "Понятие сделок" never surfaced.
+#
+# Matched only in the oblique cases, where the phrase can only be the framing
+# reading. "гражданские права" and "гражданских прав" (civil *rights*) are a
+# genuine subject and use different adjective endings, so they are left alone.
+_BRANCH_OF_LAW = re.compile(
+    r"\b(?:гражданск|уголовн|трудов|налогов|семейн|администрат\w*)\w*(?:ому|ого|ом)"
+    r"\s+прав(?:у|а|е)\b",
+    re.IGNORECASE,
+)
+
+
+def strip_branch_of_law(query: str) -> str:
+    """Drop branch-of-law qualifiers, keeping the question's actual subject."""
+    return _BRANCH_OF_LAW.sub(" ", query)
+
+
 def content_tokens(query: str, language_value: str) -> list[str]:
     """Query tokens with interrogative scaffolding removed.
 
@@ -100,7 +121,7 @@ def content_tokens(query: str, language_value: str) -> list[str]:
     """
     fam = _family(language_value)
     framing = _FRAMING.get(fam, frozenset())
-    raw = [normalise_token(t) for t in _WORD.findall(query)]
+    raw = [normalise_token(t) for t in _WORD.findall(strip_branch_of_law(query))]
     raw = [t for t in raw if t and not t.isdigit()]
     kept = [t for t in raw if t not in framing]
     return kept or raw
