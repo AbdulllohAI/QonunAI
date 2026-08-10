@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.db.models import ActStatus, ActType, Chunk, LegalAct, Language
 from app.services.lang.translit import cyrillic_to_latin, normalize, script_variants
+from app.services.rag.synonyms import expand_tokens
 from app.services.rag.query_prep import content_tokens, stem_variants
 from app.services.rag.references import (  # noqa: F401  (re-exported)
     LegalReference,
@@ -81,7 +82,12 @@ def build_tsquery(query: str, language: Language) -> tuple[str, str]:
 
     tokens: list[str] = []
     for variant in script_variants(query):
-        for raw in content_tokens(variant, language.value):
+        content = content_tokens(variant, language.value)
+        # Synonym expansion belongs here, in the lexical branches, and not in
+        # the dense one: padding the embedded text with synonyms moves the
+        # query vector away from what the user actually wrote. Additions only —
+        # the terms the user typed are always kept.
+        for raw in content + expand_tokens(content):
             forms = stem_variants(raw) if needs_stemming else [raw]
             for token in forms:
                 if token and token not in tokens:
