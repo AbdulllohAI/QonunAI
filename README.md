@@ -14,7 +14,7 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
 [![Recall@5](https://img.shields.io/badge/Recall%405-0.912-2ea44f)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.824-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.836-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -353,7 +353,7 @@ in the committed config.
 ## 📊 Retrieval benchmark
 
 Quality claims are measured, not asserted. `uzlegal-v1`
-([`backend/benchmarks/`](backend/benchmarks/)) holds **57 scored questions**
+([`backend/benchmarks/`](backend/benchmarks/)) holds **58 scored questions**
 across **all 13 indexed acts** in Uzbek Latin, Uzbek Cyrillic and Russian, plus
 out-of-scope and adversarial items. Gold article numbers were read directly from
 `chunks.heading` in the production corpus and every `(act, article)` pair was
@@ -370,11 +370,11 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 
 | Metric | Sparse only | With dense | + heading fixes | Current (57 q) | Target |
 |---|---|---|---|---|---|
-| Recall@1 | 0.600 | 0.733 | 0.767 | **0.754** | — |
+| Recall@1 | 0.600 | 0.733 | 0.767 | **0.776** | — |
 | Recall@3 | — | 0.867 | 0.933 | **0.877** | — |
-| Recall@5 | 0.833 | 0.867 | 0.933 | **0.912** | 0.90 ✅ |
-| Recall@10 | — | 0.933 | 1.000 | **0.947** | 0.95 |
-| MRR | 0.694 | 0.807 | 0.854 | **0.824** | 0.75 ✅ |
+| Recall@5 | 0.833 | 0.867 | 0.933 | **0.914** | 0.90 ✅ |
+| Recall@10 | — | 0.933 | 1.000 | **0.948** | 0.95 |
+| MRR | 0.694 | 0.807 | 0.854 | **0.836** | 0.75 ✅ |
 | Median retrieval | 695 ms | 1276 ms | 1327 ms | 1441 ms | < 2000 ms |
 
 ### Read this before trusting the earlier columns
@@ -495,17 +495,45 @@ questions are genuinely harder than the ambiguous ones they displaced, and
 Recall@10 slipped from 0.965 to 0.947. The numbers now measure retrieval rather
 than the benchmark's own defects.
 
+### Choosing between codes
+
+`uz-007` asked *"Какая ответственность за нарушение правил пожарной
+безопасности?"* and expected Criminal Code art. 259. The Code of Administrative
+Responsibility carries an article with the **identical title**, art. 211, so the
+question had no single correct answer and the gold label picked one arbitrarily.
+The question now names the kind of liability, and `uz-007a` mirrors it for the
+administrative side — testing one direction alone would not show whether the
+system distinguishes the codes or merely prefers one of them.
+
+Rewording exposed a real gap rather than closing the item. Asked specifically
+about *уголовная* liability, the system still returned the administrative
+article first: nothing in either article's text or title says which liability it
+imposes, and the only thing separating them is the name of the code they sit in
+— which retrieval never looked at.
+
+`act_affinity` scores how strongly a question names the act a candidate comes
+from. One-directionally, because act names are mostly dates and boilerplate no
+question would repeat; and excluding the words common to every act name, without
+which "ответственность" matches the administrative code's own title and drags
+every liability question toward it. Both directions now rank first.
+
 ### Where it still fails
 
-`uz-104` and `uz-110` are the hard misses. `uz-110` remains the clearest case of
-genuine paraphrase: it asks about liability for someone who did not understand
-their actions, and the article is titled «Невменяемость», which shares no
-vocabulary with any natural phrasing of the question.
+Four hard misses remain, and they are ordinary paraphrase rather than a shared
+structural cause:
 
-`uz-007` is act disambiguation rather than retrieval — «Нарушение правил
-пожарной безопасности» exists in more than one code, and the question does not
-say which one it means. That one is arguably still a benchmark defect rather
-than a system one.
+- `uz-110` asks about liability for someone who did not understand their
+  actions; the article is titled «Невменяемость», which shares no vocabulary
+  with any natural phrasing.
+- `uz-104`, `uz-130` and `uz-160` are similar — the governing article's title
+  restates the concept in statutory terms the question does not use.
+
+This is the residue that a synonym map and lexical ranking cannot reach, and the
+place where a working cross-encoder reranker would help most. That remains
+blocked on latency (above).
+
+Recall@10 sits at 0.948 against a 0.95 target — the one metric still short, and
+by a single item.
 
 ## What's been verified against the real running app
 
