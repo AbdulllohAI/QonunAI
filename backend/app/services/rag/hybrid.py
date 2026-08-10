@@ -42,6 +42,7 @@ from app.services.rag.keyword import (
     keyword_searcher,
 )
 from app.services.rag.reranker import reranker
+from app.services.rag.title_affinity import title_affinity
 from app.services.rag.types import RetrievalResult, RetrievedChunk
 from app.services.rag.vector_store import vector_store
 
@@ -149,6 +150,18 @@ class HybridRetriever:
             ] or reranked[:3]
         else:
             reranked = reranked[:top_k]
+
+        # Title precision as a tiebreaker. RRF knows a candidate ranked well in
+        # several branches but not *why*; among candidates it scores alike, the
+        # article whose title is the question — rather than one that merely
+        # mentions its words — is the one that governs.
+        if settings.TITLE_AFFINITY_WEIGHT:
+            lang_value = lang.value
+            for chunk in reranked:
+                chunk.fused_score += settings.TITLE_AFFINITY_WEIGHT * title_affinity(
+                    query, chunk.heading, lang_value
+                )
+            reranked.sort(key=lambda c: c.score, reverse=True)
 
         # Re-pin: reranking can bury an explicitly requested article.
         reranked = self._pin_exact(pinned, reranked) + [

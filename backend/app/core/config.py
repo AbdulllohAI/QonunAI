@@ -73,6 +73,13 @@ class Settings(BaseSettings):
     """
 
     HEADING_RRF_WEIGHT: float = 2.5
+
+    TITLE_AFFINITY_WEIGHT: float = 0.06
+    """Weight of the title-precision tiebreaker added to the fused score.
+
+    Kept small on purpose. Fused scores sit around 0.15-0.21, so this reorders
+    candidates RRF already treats as comparable rather than promoting an
+    unrelated article that happens to share a word."""
     """How much an article-title match counts for, relative to dense and sparse.
 
     A title match is the strongest single signal that an article is *about* the
