@@ -13,8 +13,8 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
-[![Recall@5](https://img.shields.io/badge/Recall%405-0.860-dfb317)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.791-2ea44f)](backend/benchmarks/)
+[![Recall@5](https://img.shields.io/badge/Recall%405-0.877-dfb317)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.795-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -372,9 +372,9 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 |---|---|---|---|---|---|
 | Recall@1 | 0.600 | 0.733 | 0.767 | **0.719** | — |
 | Recall@3 | — | 0.867 | 0.933 | **0.860** | — |
-| Recall@5 | 0.833 | 0.867 | 0.933 | **0.860** | 0.90 |
-| Recall@10 | — | 0.933 | 1.000 | **0.912** | 0.95 |
-| MRR | 0.694 | 0.807 | 0.854 | **0.791** | 0.75 ✅ |
+| Recall@5 | 0.833 | 0.867 | 0.933 | **0.877** | 0.90 |
+| Recall@10 | — | 0.933 | 1.000 | **0.930** | 0.95 |
+| MRR | 0.694 | 0.807 | 0.854 | **0.795** | 0.75 ✅ |
 | Median retrieval | 695 ms | 1276 ms | 1327 ms | 1347 ms | < 2000 ms |
 
 ### Read this before trusting the earlier columns
@@ -392,26 +392,55 @@ Run-to-run variation is also real: two consecutive runs of this same
 configuration scored MRR 0.705 and 0.791, the first against a colder embedding
 cache. Single runs are indicative, not precise.
 
+### Vocabulary: asking in ordinary words
+
+The statute says *xodim*; a person describing their own situation says
+*ishchi*. Both mean "employee", nothing lexical connects them, and the
+multilingual embedding did not bridge them either — the dense branch scored the
+gold article 0.0 on both phrasings. Labour Code art. 160 ranked 1st when asked
+with the statute's word and did not appear in the top 20 when asked with the
+ordinary one.
+
+A small synonym map ([`synonyms.py`](backend/app/services/rag/synonyms.py))
+now expands query terms for the **lexical branches only** — the dense branch
+embeds the question as asked, since padding that text with synonyms moves the
+query vector away from what the user wrote. It is deliberately conservative:
+*shartnoma* (contract) and *bitim* (transaction) are not grouped, because in a
+tool that claims to cite the governing provision, conflating terms a lawyer
+distinguishes is worse than a miss. Tests pin those non-equivalences down.
+
+Three things surfaced while building it, each of which would have been invisible
+without checking against the database:
+
+1. **A space inside a tsquery term is a syntax error.** Multi-word synonyms were
+   emitted as `иш берувчи:*`, `to_tsquery` raised, and the keyword search turned
+   that into an empty result through its except-and-return-`[]` handler — so
+   adding synonyms silently disabled the sparse and title branches for exactly
+   the queries they were meant to help. They are adjacency phrases now.
+2. **The reflexive pronoun was signal, not scaffolding.** Stripping *o'zi* as a
+   framing word looked obviously right and destroyed the distinction between
+   art. 160 (employee's own initiative) and art. 166 (employer's).
+3. **Postgres full-text ranking has no corpus statistics.** *ходим* appears in
+   hundreds of Labour Code titles and *ходимнинг ташаббуси* in exactly the one
+   article about resigning, but `ts_rank_cd` weights them identically, and
+   length normalisation then favours the shorter, vaguer title — the governing
+   article scored 0.011 against a competitor's 0.033. Article titles containing
+   the whole phrase are now ranked ahead of titles sharing a single word.
+
+Art. 160 moved from absent to rank 5 on the ordinary-vocabulary phrasing.
+Aggregate movement was small — Recall@5 0.860 → 0.877, MRR 0.791 → 0.795 — which
+is within the run-to-run variance noted above, so the targeted fix is verified
+directly rather than inferred from the totals.
+
 ### Where it still fails
 
-The failures cluster, and the cluster is informative — **cross-script and
-cross-language retrieval**, where the question is in Uzbek Latin and the
-governing article exists only in Cyrillic or Russian:
-
-| Item | Question language | Gold act language | Result |
-|---|---|---|---|
-| uz-160 | uz-Latn | uz-Cyrl (Labour) | miss |
-| uz-161 | uz-Latn | uz-Cyrl (Tax) | rank 9 |
-| uz-171 | uz-Cyrl | ru (Civil) | miss |
-| uz-172 | uz-Latn | ru (Crim. Procedure) | miss |
-
-The sharpest case is uz-160 against uz-026: **the same article**, Labour Code
-160, asked twice. uz-026 uses *xodim* (the statute's word) and lands at rank 1;
-uz-160 uses *ishchi*, an ordinary synonym, and misses entirely. Transliteration
-bridges scripts and the embedding bridges languages, but neither reliably
-bridges a synonym the statute does not use — which is exactly how a non-lawyer
-phrases a question. That is the next thing worth fixing, and it is a corpus and
-query-expansion problem rather than a ranking one.
+Cross-language retrieval, where the question is in one language and the
+governing article exists only in another, remains the weak area: `uz-171`
+(Uzbek Cyrillic question, Russian-only Civil Code) and `uz-172` (Uzbek Latin,
+Russian-only Criminal Procedure Code) are still hard misses. Synonym expansion
+does not help there, because the gap is not vocabulary within a language but
+the absence of any lexical bridge between them — which leaves dense retrieval,
+and bge-m3's Uzbek is the weakest part of its multilingual coverage.
 
 ## What's been verified against the real running app
 
