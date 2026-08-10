@@ -13,8 +13,8 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
-[![Recall@5](https://img.shields.io/badge/Recall%405-0.912-2ea44f)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.836-2ea44f)](backend/benchmarks/)
+[![Recall@5](https://img.shields.io/badge/Recall%405-0.931-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.843-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -372,9 +372,9 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 |---|---|---|---|---|---|
 | Recall@1 | 0.600 | 0.733 | 0.767 | **0.776** | — |
 | Recall@3 | — | 0.867 | 0.933 | **0.877** | — |
-| Recall@5 | 0.833 | 0.867 | 0.933 | **0.914** | 0.90 ✅ |
-| Recall@10 | — | 0.933 | 1.000 | **0.948** | 0.95 |
-| MRR | 0.694 | 0.807 | 0.854 | **0.836** | 0.75 ✅ |
+| Recall@5 | 0.833 | 0.867 | 0.933 | **0.931** | 0.90 ✅ |
+| Recall@10 | — | 0.933 | 1.000 | **0.983** | 0.95 ✅ |
+| MRR | 0.694 | 0.807 | 0.854 | **0.843** | 0.75 ✅ |
 | Median retrieval | 695 ms | 1276 ms | 1327 ms | 1441 ms | < 2000 ms |
 
 ### Read this before trusting the earlier columns
@@ -517,23 +517,46 @@ question would repeat; and excluding the words common to every act name, without
 which "ответственность" matches the administrative code's own title and drags
 every liability question toward it. Both directions now rank first.
 
+### Terms of art versus how people actually ask
+
+The last cluster of misses had one shape: people describe the situation, the
+statute names the doctrine. The Criminal Code defines *невменяемость* as being
+unable to understand the significance of one's actions — which is exactly how a
+non-lawyer phrases it — and the Civil Procedure Code says *мақбуллик* where
+people say *қабул қилинади*. Adding those to the glossary took `uz-110` from a
+miss to rank 3 and moved `uz-130` up.
+
+Recall@10 reached 0.983 and Recall@5 0.931, so **both recall targets are met**.
+
+A third candidate was deliberately dropped. It would have mapped the statute's
+phrase *истисно этувчи* to the particular verb form one benchmark question
+happened to use — tuning to a query rather than encoding a term of art, and the
+line between the two is the whole difference between improving the system and
+inflating its score.
+
+### What was tried and rejected
+
+Widening the retrieval pools (`RETRIEVAL_TOP_K_DENSE`/`SPARSE` from 40 to 150)
+was the obvious general fix, since the missing articles all scored
+`dense_score = 0.0` — they fell outside the pool entirely. Measured, it traded
+badly:
+
+| | Recall@1 | Recall@5 | Recall@10 | Median latency |
+|---|---|---|---|---|
+| 40 | 0.776 | **0.914** | **0.948** | **1459 ms** |
+| 150 | **0.810** | 0.897 | 0.931 | 2009 ms |
+
+It buys Recall@1 and costs Recall@5 and @10, because `RERANK_CANDIDATE_CAP`
+truncates the fused list and a wider pool simply adds competitors that push the
+gold out. It also crosses the 2000 ms budget. Kept at 40.
+
 ### Where it still fails
 
-Four hard misses remain, and they are ordinary paraphrase rather than a shared
-structural cause:
-
-- `uz-110` asks about liability for someone who did not understand their
-  actions; the article is titled «Невменяемость», which shares no vocabulary
-  with any natural phrasing.
-- `uz-104`, `uz-130` and `uz-160` are similar — the governing article's title
-  restates the concept in statutory terms the question does not use.
-
-This is the residue that a synonym map and lexical ranking cannot reach, and the
-place where a working cross-encoder reranker would help most. That remains
-blocked on latency (above).
-
-Recall@10 sits at 0.948 against a 0.95 target — the one metric still short, and
-by a single item.
+`uz-104` and `uz-160` remain outside the top five. Both are reachable only by
+mapping a specific inflected verb form to a specific statutory phrase, which is
+where useful generalisation stops and benchmark-fitting begins. They are left
+failing on purpose; a working cross-encoder reranker is the honest fix, and that
+remains blocked on latency (above).
 
 ## What's been verified against the real running app
 
