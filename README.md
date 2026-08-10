@@ -14,7 +14,7 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
 [![Recall@5](https://img.shields.io/badge/Recall%405-0.931-2ea44f)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.843-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.852-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -316,25 +316,43 @@ went from 0.694 to 0.807 and Recall@1 from 0.600 to 0.733.
 
 ### Why reranking is still off
 
-`bge-reranker-v2-m3` is a 568M-parameter cross-encoder that scores every
-candidate passage against the query. It was enabled and measured on
-`performance-4x` (4 **dedicated** cores, 8 GB):
+Two cross-encoders were tried and measured against the 58-question benchmark.
+Both were reverted.
 
-| Candidates × tokens | Latency |
-|---|---|
-| 30 × 1024 | 71 s |
-| 12 × 320 | > 200 s (timed out) |
+| | Recall@1 | Recall@5 | Recall@10 | MRR | Median latency |
+|---|---|---|---|---|---|
+| **No reranker** | **0.793** | **0.931** | **0.983** | **0.852** | **1560 ms** |
+| `bge-reranker-base` (278M) | 0.569 | 0.897 | 0.948 | 0.694 | 16 684 ms |
+| `bge-reranker-v2-m3` (568M) | — | — | — | — | 71 s at 30×1024 |
 
-The ranking it produces is good — it puts Criminal Code art. 137 first with a
-score of 0.73 — but not at any latency a user will wait for. Cutting the work
-by ~25x did not produce a proportional speedup, which points at the per-forward
-cost on CPU rather than the amount of work queued.
+`bge-reranker-base` is the obvious candidate on size — half the parameters of
+v2-m3 — and it is **worse on every axis**. Latency is 10× the no-reranker path
+and eight times over budget, and quality collapses: Recall@1 falls from 0.793 to
+0.569 and MRR drops below its target for the first time since dense retrieval
+was enabled.
 
-A cross-encoder this size needs a GPU, or a materially smaller reranker such as
-`bge-reranker-base` (278M). It is off, the machines are back on `shared-cpu-4x`
-since the dedicated cores bought nothing without it, and `RERANK_CANDIDATE_CAP`
-and `RERANK_MAX_LENGTH` are now settings so the next attempt needs no code
-change. The relevance threshold correctly does not apply while it is off.
+The quality collapse is not a tuning problem. `bge-reranker-base` is trained on
+Chinese and English; this corpus is Uzbek and Russian. Its scores gave it away
+before the benchmark did — they clustered at 0.5000, 0.5027, 0.5042, and
+sigmoid(0) is exactly 0.5, so the model was emitting near-zero logits. It had no
+opinion, and reordering by noise is worse than not reordering.
+
+The multilingual member of that family *is* `bge-reranker-v2-m3`, which is the
+one that is too slow. That is the real bind: in the BGE family, multilingual and
+small are mutually exclusive.
+
+Worth noting what this corrects. The original v2-m3 measurement was taken before
+the model was warmed at startup, so it was confounded by a 2.3 GB download
+happening inside the request. Re-measuring it cleanly, at the current
+`RERANK_CANDIDATE_CAP` of 12 and `RERANK_MAX_LENGTH` of 320, is still worth
+doing — the earlier number was not a fair test of the model, only of the cold
+path.
+
+If reranking is wanted, the honest options are a GPU machine for v2-m3, or a
+multilingual reranker in the 278M class such as
+`jinaai/jina-reranker-v2-base-multilingual`. `RERANKER_MODEL`,
+`RERANK_CANDIDATE_CAP` and `RERANK_MAX_LENGTH` are all settings, so trying one
+needs no code change.
 
 ### Current production configuration
 
@@ -370,11 +388,11 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 
 | Metric | Sparse only | With dense | + heading fixes | Current (57 q) | Target |
 |---|---|---|---|---|---|
-| Recall@1 | 0.600 | 0.733 | 0.767 | **0.776** | — |
+| Recall@1 | 0.600 | 0.733 | 0.767 | **0.793** | — |
 | Recall@3 | — | 0.867 | 0.933 | **0.877** | — |
 | Recall@5 | 0.833 | 0.867 | 0.933 | **0.931** | 0.90 ✅ |
 | Recall@10 | — | 0.933 | 1.000 | **0.983** | 0.95 ✅ |
-| MRR | 0.694 | 0.807 | 0.854 | **0.843** | 0.75 ✅ |
+| MRR | 0.694 | 0.807 | 0.854 | **0.852** | 0.75 ✅ |
 | Median retrieval | 695 ms | 1276 ms | 1327 ms | 1441 ms | < 2000 ms |
 
 ### Read this before trusting the earlier columns
