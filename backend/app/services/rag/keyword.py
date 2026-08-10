@@ -18,7 +18,7 @@ import re
 import uuid
 from typing import Sequence
 
-from sqlalchemy import Select, func, literal, or_, select, text
+from sqlalchemy import Select, case, func, literal, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -95,6 +95,22 @@ def build_tsquery(query: str, language: Language) -> tuple[str, str]:
     if not tokens:
         tokens = [normalize(query).lower() or "x"]
     return config, " | ".join(_as_tsquery_term(t) for t in tokens[:60])
+
+
+def build_phrase_tsquery(query: str, language: Language) -> str | None:
+    """The multi-word terms of the query, as an OR of adjacency phrases.
+
+    These come from synonym expansion and are far more discriminative than the
+    single words around them: in the Labour Code "ходим" appears in hundreds of
+    titles, while "ходимнинг ташаббуси" appears in the one article that governs
+    resignation. Postgres full-text ranking has no corpus statistics, so it
+    cannot tell those apart — ts_rank_cd weights a ubiquitous word exactly like
+    a rare phrase, and then length normalisation actively favours the shorter,
+    vaguer title. Scoring phrase hits separately restores the distinction.
+    """
+    _, tsquery = build_tsquery(query, language)
+    phrases = [t.strip() for t in tsquery.split("|") if "<->" in t]
+    return " | ".join(phrases) if phrases else None
 
 
 def _as_tsquery_term(token: str) -> str:
@@ -174,6 +190,7 @@ class KeywordSearcher:
         config, tsquery = build_tsquery(query, language)
         ts = func.to_tsquery(config, tsquery)
         heading_tsv = func.to_tsvector(config, func.coalesce(Chunk.heading, ""))
+        phrase_tsquery = build_phrase_tsquery(query, language)
         # 2 = divide by document length. Dividing by unique word count as well
         # (flag 8) double-penalises длинные titles and let two-word structural
         # headings outrank the precise article title: for "employee-initiated
@@ -194,12 +211,24 @@ class KeywordSearcher:
             .where(heading_tsv.op("@@")(ts))
         )
         stmt = self._filters(stmt, languages, act_types, act_ids, in_force_only)
-        stmt = stmt.order_by(rank.desc()).limit(top_k)
+        if phrase_tsquery:
+            # A title containing the whole phrase outranks any title that
+            # merely shares a word with it, regardless of length.
+            phrase_hit = case(
+                (heading_tsv.op("@@")(func.to_tsquery(config, phrase_tsquery)), 1),
+                else_=0,
+            )
+            stmt = stmt.order_by(phrase_hit.desc(), rank.desc()).limit(top_k)
+        else:
+            stmt = stmt.order_by(rank.desc()).limit(top_k)
 
         try:
             rows = (await session.execute(stmt)).all()
         except Exception as exc:
-            log.warning("heading search failed", extra={"error": str(exc), "query": query[:120]})
+            log.error(
+                "heading_search_failed",
+                extra={"error": str(exc), "query": query[:120]},
+            )
             return []
         return [(chunk, act, float(r)) for chunk, act, r in rows]
 
