@@ -100,3 +100,38 @@ def test_russian_contract_and_transaction_are_not_synonyms():
 def test_fine_and_punishment_are_not_conflated():
     """A fine is one kind of penalty, not a synonym for penalty in general."""
     assert "jazo" not in expand_tokens(["jarima"])
+
+
+# ------------------------------------------------ Uzbek <-> Russian bridge
+
+def test_uzbek_term_reaches_its_russian_counterpart():
+    """43% of this corpus is Russian-only. Without a bridge, an Uzbek question
+    cannot reach it through the keyword branches at all."""
+    assert "сделка" in expand_tokens(["bitim"])
+
+
+def test_bridge_is_bidirectional():
+    assert "bitim" in expand_tokens(["сделка"])
+
+
+def test_cyrillic_uzbek_also_bridges():
+    """The Uzbek side is written in Latin in the table; Cyrillic is generated."""
+    assert "сделка" in expand_tokens(["битим"])
+
+
+def test_interrogation_bridges_for_procedure_questions():
+    assert "допрос" in expand_tokens(["soroq"])
+
+
+def test_truncated_form_can_reach_a_russian_fleeting_vowel():
+    """The bridge is only useful if it survives inflection: the corpus has
+    "сделок", the glossary has "сделка", and neither prefixes the other."""
+    terms = _terms("Битим деб нима тушунилади?", Language.UZ_CYRL)
+    assert any("сделок".startswith(t) for t in terms), sorted(terms)
+
+
+def test_bridge_keeps_contract_and_transaction_apart_across_languages():
+    """The two languages must not become a back channel for merging terms the
+    Civil Code distinguishes."""
+    assert "договор" not in expand_tokens(["bitim"])
+    assert "сделка" not in expand_tokens(["shartnoma"])

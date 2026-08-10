@@ -36,8 +36,9 @@ __all__ = ["expand_tokens", "SYNONYM_GROUPS"]
 SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
     # --- Uzbek: employment ------------------------------------------------
     # The Labour Code's own word is "xodim"; "ishchi" is what people say.
-    frozenset({"xodim", "ishchi", "ishlovchi"}),
-    frozenset({"ish beruvchi", "ishberuvchi"}),
+    frozenset({"xodim", "ishchi", "ishlovchi", "работник", "сотрудник",
+               "трудящийся"}),
+    frozenset({"ish beruvchi", "ishberuvchi", "работодатель"}),
     # Leaving a job: the statute frames it as terminating the contract.
     frozenset({"ishdan bo'shash", "ishdan bo'shatish", "ishdan ketish",
                "ishdan chiqish", "mehnat shartnomasini bekor qilish"}),
@@ -48,28 +49,66 @@ SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
     # reflexive pronoun is expanded rather than stripped as framing.
     frozenset({"o'z tashabbusi", "o'z xohishi", "o'z arizasi", "o'zi",
                "xodimning tashabbusi", "ixtiyoriy"}),
-    frozenset({"ish haqi", "oylik", "maosh"}),
-    frozenset({"mehnat ta'tili", "ta'til"}),
+    frozenset({"ish haqi", "oylik", "maosh", "заработная плата", "зарплата",
+               "оплата труда"}),
+    frozenset({"mehnat ta'tili", "ta'til", "отпуск", "трудовой отпуск"}),
     # --- Uzbek: general ---------------------------------------------------
-    frozenset({"jazo", "jazolash"}),
-    frozenset({"jarima", "pul jarimasi"}),
-    frozenset({"javobgarlik", "mas'uliyat"}),
+    frozenset({"jazo", "jazolash", "наказание", "мера наказания"}),
+    frozenset({"jarima", "pul jarimasi", "штраф", "денежное взыскание"}),
+    frozenset({"javobgarlik", "mas'uliyat", "ответственность",
+               "юридическая ответственность"}),
     # --- Russian: employment ----------------------------------------------
-    frozenset({"работник", "сотрудник", "трудящийся"}),
     frozenset({"увольнение", "расторжение трудового договора",
                "прекращение трудового договора"}),
     # Listed without the preposition too: "по" is stripped as framing before
     # expansion runs, so a group keyed only on the full phrase never matches.
     frozenset({"собственному желанию", "собственное желание",
                "инициативе работника", "своей инициативе"}),
-    frozenset({"заработная плата", "зарплата", "оплата труда"}),
-    frozenset({"отпуск", "трудовой отпуск"}),
     # --- Russian: general -------------------------------------------------
-    frozenset({"наказание", "мера наказания"}),
-    frozenset({"штраф", "денежное взыскание"}),
-    frozenset({"ответственность", "юридическая ответственность"}),
     frozenset({"жилье", "жилище", "жилое помещение"}),
+    # --- Uzbek <-> Russian legal glossary ---------------------------------
+    # Nothing lexical connects the two languages, so a question asked in Uzbek
+    # cannot reach a Russian-only act (43% of this corpus) through the keyword
+    # branches at all. That leaves dense retrieval alone, and bge-m3's Uzbek is
+    # the weakest part of its multilingual coverage — measured: "Битим деб нима
+    # тушунилади?" never reached Civil Code art. 101 "Понятие сделок".
+    #
+    # Legal terminology is a closed vocabulary, which makes a glossary a
+    # reasonable bridge where a general bilingual dictionary would not be. Each
+    # pair below is a term of art with a single settled counterpart; where a
+    # term is genuinely ambiguous across the two systems it is left out.
+    frozenset({"bitim", "сделка"}),
+    frozenset({"shartnoma", "договор"}),
+    frozenset({"mulk", "собственность"}),
+    frozenset({"meros", "наследство", "наследование"}),
+    frozenset({"jinoyat", "преступление"}),
+    frozenset({"o'g'irlik", "кража", "хищение"}),
+    frozenset({"qotillik", "odam o'ldirish", "убийство"}),
+    frozenset({"ayb", "вина"}),
+    frozenset({"so'roq", "допрос"}),
+    frozenset({"dalil", "доказательство"}),
+    frozenset({"tergovchi", "следователь"}),
+    frozenset({"guvoh", "свидетель"}),
+    frozenset({"da'vo", "иск"}),
+    frozenset({"sud", "суд"}),
+    frozenset({"sudya", "судья"}),
+    frozenset({"soliq", "налог"}),
+    frozenset({"nikoh", "брак"}),
+    frozenset({"farzandlikka olish", "усыновление"}),
+    frozenset({"vasiylik", "опека"}),
+    frozenset({"aliment", "алименты"}),
+    frozenset({"huquq", "право"}),
+    frozenset({"majburiyat", "обязанность"}),
+    frozenset({"qonun", "закон"}),
+    frozenset({"modda", "статья"}),
+    frozenset({"mehnat", "труд"}),
+    frozenset({"zarar", "ущерб", "вред"}),
+    frozenset({"muddat", "срок"}),
+    frozenset({"ariza", "заявление"}),
+    frozenset({"qaror", "решение", "постановление"}),
+    frozenset({"shikoyat", "жалоба"}),
 )
+
 
 
 def _norm(term: str) -> str:
