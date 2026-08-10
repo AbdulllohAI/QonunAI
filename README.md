@@ -316,43 +316,50 @@ went from 0.694 to 0.807 and Recall@1 from 0.600 to 0.733.
 
 ### Why reranking is still off
 
-Two cross-encoders were tried and measured against the 58-question benchmark.
-Both were reverted.
+Three cross-encoders were tried against the 58-question benchmark. All were
+reverted, and the reason changed as the search narrowed.
 
-| | Recall@1 | Recall@5 | Recall@10 | MRR | Median latency |
-|---|---|---|---|---|---|
-| **No reranker** | **0.793** | **0.931** | **0.983** | **0.852** | **1560 ms** |
-| `bge-reranker-base` (278M) | 0.569 | 0.897 | 0.948 | 0.694 | 16 684 ms |
-| `bge-reranker-v2-m3` (568M) | — | — | — | — | 71 s at 30×1024 |
+| Model | Multilingual | Score spread | Latency in service |
+|---|---|---|---|
+| `bge-reranker-v2-m3` (568M) | yes | — | 71 s at 30×1024 |
+| `bge-reranker-base` (278M) | **no** (zh/en) | 0.5000, 0.5027, 0.5042 | 16.7 s median |
+| `jina-reranker-v2-base-multilingual` (278M) | yes | 0.64, 0.60, 0.59 | 40 s+, then unusable |
 
-`bge-reranker-base` is the obvious candidate on size — half the parameters of
-v2-m3 — and it is **worse on every axis**. Latency is 10× the no-reranker path
-and eight times over budget, and quality collapses: Recall@1 falls from 0.793 to
-0.569 and MRR drops below its target for the first time since dense retrieval
-was enabled.
+`bge-reranker-base` failed on **quality**. Its scores clustered at 0.5, and
+sigmoid(0) is exactly 0.5 — it was emitting near-zero logits, having no opinion
+on Russian text. Reordering by noise is worse than not reordering: Recall@1 fell
+from 0.793 to 0.569 and MRR below target for the only time since dense
+retrieval was enabled.
 
-The quality collapse is not a tuning problem. `bge-reranker-base` is trained on
-Chinese and English; this corpus is Uzbek and Russian. Its scores gave it away
-before the benchmark did — they clustered at 0.5000, 0.5027, 0.5042, and
-sigmoid(0) is exactly 0.5, so the model was emitting near-zero logits. It had no
-opinion, and reordering by noise is worse than not reordering.
+`jina-reranker-v2-base-multilingual` is the right model. It is 278M *and*
+genuinely multilingual, the combination BGE does not offer, and its scores
+discriminate properly — asked what a transaction is, it scored «Понятие
+сделок» 0.32 against 0.13 for an unrelated bribery article. Loaded in an
+isolated process **on the production machine** it also ran at roughly 0.14 s per
+pair, which is about 1.7 s for a full 12-candidate rerank.
 
-The multilingual member of that family *is* `bge-reranker-v2-m3`, which is the
-one that is too slow. That is the real bind: in the BGE family, multilingual and
-small are mutually exclusive.
+Inside the running service the same model took 40 s per query and then stopped
+completing them. That difference is the actual finding: the blocker is not the
+model but the host. One `shared-cpu-4x` machine runs a 568M embedder and a
+278M cross-encoder in a single Python process with one uvicorn worker, so the
+reranker competes with query embedding for the same cores and serialises behind
+every other request.
 
-Worth noting what this corrects. The original v2-m3 measurement was taken before
-the model was warmed at startup, so it was confounded by a 2.3 GB download
-happening inside the request. Re-measuring it cleanly, at the current
-`RERANK_CANDIDATE_CAP` of 12 and `RERANK_MAX_LENGTH` of 320, is still worth
-doing — the earlier number was not a fair test of the model, only of the cold
-path.
+So the honest options are infrastructure, not model selection:
 
-If reranking is wanted, the honest options are a GPU machine for v2-m3, or a
-multilingual reranker in the 278M class such as
-`jinaai/jina-reranker-v2-base-multilingual`. `RERANKER_MODEL`,
-`RERANK_CANDIDATE_CAP` and `RERANK_MAX_LENGTH` are all settings, so trying one
-needs no code change.
+- a GPU machine, where `bge-reranker-v2-m3` becomes trivially affordable; or
+- the reranker as a **separate service** with its own CPU, so it stops competing
+  with embedding; or
+- leave it off, which is what the numbers currently favour.
+
+`RERANKER_MODEL`, `RERANKER_TRUST_REMOTE_CODE`, `RERANK_CANDIDATE_CAP` and
+`RERANK_MAX_LENGTH` are all settings, so any of these needs no code change.
+
+One operational note learned the hard way: `flyctl secrets set` replaces the
+machine, which wipes the ephemeral `/models` cache and forces a full
+re-download of every model on the next boot. That is why `PREFETCH_MODELS`
+exists — and why it is off, since baking the weights in produces an image too
+large for Fly to deploy (above).
 
 ### Current production configuration
 
