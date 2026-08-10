@@ -14,7 +14,7 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
 [![Recall@5](https://img.shields.io/badge/Recall%405-0.912-2ea44f)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.826-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.824-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -373,8 +373,8 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 | Recall@1 | 0.600 | 0.733 | 0.767 | **0.754** | — |
 | Recall@3 | — | 0.867 | 0.933 | **0.877** | — |
 | Recall@5 | 0.833 | 0.867 | 0.933 | **0.912** | 0.90 ✅ |
-| Recall@10 | — | 0.933 | 1.000 | **0.965** | 0.95 ✅ |
-| MRR | 0.694 | 0.807 | 0.854 | **0.826** | 0.75 ✅ |
+| Recall@10 | — | 0.933 | 1.000 | **0.947** | 0.95 |
+| MRR | 0.694 | 0.807 | 0.854 | **0.824** | 0.75 ✅ |
 | Median retrieval | 695 ms | 1276 ms | 1327 ms | 1441 ms | < 2000 ms |
 
 ### Read this before trusting the earlier columns
@@ -459,76 +459,53 @@ Recall@5 went 0.877 → 0.912 and Recall@10 0.930 → 0.965, both clearing targe
 on the 57-question set. Median retrieval rose from 1327 ms to 1441 ms — the
 expanded term list costs something, and it stays well inside budget.
 
-### Where it still fails
+### Auditing the benchmark itself
 
-Four items remain outside the top five, and they no longer share a single
-cause: `uz-110` (an administrative-liability question whose article title,
-«Невменяемость», shares no vocabulary with how anyone would phrase it),
-`uz-130`, `uz-150` and `uz-161`. These look like the ordinary long tail of
-paraphrase rather than a structural gap, which is a better place to be than the
-systematic failures the earlier rounds exposed.
+A benchmark can be wrong in ways that look exactly like the system being wrong.
+Auditing all 57 scored items against the corpus found four whose gold article
+shared its title with another article in the same act — retrieval was being
+marked incorrect for returning an equally correct provision:
 
-### Ranking the right article first
-
-Recall@1 sat at exactly 0.719 through three consecutive improvements that each
-raised Recall@5 and @10. RRF fuses ranks, so it knows a candidate placed well in
-several branches but nothing about *why* — enough to surface the governing
-article, not enough to put it first.
-
-The signal that separates them is title precision. Asked when a transaction
-requires notarisation, the corpus offers both:
-
-| Article | Title | |
+| Item | Problem | Fix |
 |---|---|---|
-| 110 | «Нотариальное удостоверение сделки» | governs it |
-| 112 | «Последствия несоблюдения нотариальной формы сделки» | a consequence of it |
+| uz-004 | Criminal Code 73 and 89 are **both** «Условно-досрочное освобождение от отбывания наказания» | accept both |
+| uz-131 | Civil Procedure 128 and 174 are **both** «Давлат божи» | accept both |
+| uz-104 | targeted «Солиқ тўловчилар» — a title the Tax Code carries **14 times**, once per tax type | replaced |
+| uz-161 | targeted «Солиқни тўлаш тартиби», repeated the same way | replaced |
 
-Both match the query's words. Art. 110's title contains *nothing else*; art. 112
-introduces "последствия" and "несоблюдения", which the question never raised.
-[`title_affinity.py`](backend/app/services/rag/title_affinity.py) measures the
-overlap in both directions — how much of the question the title covers, and how
-much of the title is question — as a harmonic mean, and adds it to the fused
-score as a tiebreaker.
+The distinction matters. Where the corpus genuinely carries one provision under
+two numbers, accepting both is correct and `gold_article` now takes a list.
+Where the question was simply too generic to have a single answer, the
+*question* was the defect and no scoring rule could rescue it.
 
-Two details decide whether it works at all. Terms are compared by **shared
-prefix** rather than truncated to a fixed length, because "сделкой" and "сделок"
-cut to five characters are "сделк" and "сдело". And both sides are folded to
-**Cyrillic**, because most of the corpus is Cyrillic while Latin is what people
-type — unfolded, a Latin question and a Cyrillic title share no characters and
-the signal is zero exactly where it is needed.
+[`audit_gold.py`](backend/benchmarks/audit_gold.py) runs this check against the
+live corpus and exits non-zero on a missing or ambiguous label, so it can gate
+a change to the benchmark:
 
-The weight was set by a paired A/B rather than intuition. The first guess, 0.06,
-moved nothing at all:
+```bash
+python backend/benchmarks/audit_gold.py --base https://uzlex-ai.fly.dev
+```
 
-| Weight | Recall@1 | MRR |
-|---|---|---|
-| 0 (control) | 0.719, 0.719 | 0.811, 0.808 |
-| 0.06 | 0.719 | 0.807 |
-| **0.15** | **0.737, 0.754** | **0.817, 0.826** |
-| 0.30 | 0.754 | 0.823 |
+It reads `/api/v1/laws/articles`, which also makes the benchmark's provenance
+claims auditable by someone without database access.
 
-Weights were alternated across runs so both arms saw the same cache and load.
-What makes this credible is the control: Recall@1 landed on 0.719 twice and had
-not moved through three previous changes, so a consistent shift is signal rather
-than the run-to-run noise that affects MRR.
+Correcting the labels was close to score-neutral, which is the point: uz-004 and
+uz-131 now pass because they were always right, while the two replacement
+questions are genuinely harder than the ambiguous ones they displaced, and
+Recall@10 slipped from 0.965 to 0.947. The numbers now measure retrieval rather
+than the benchmark's own defects.
 
 ### Where it still fails
 
-Recall@1 at 0.754 means roughly one question in four still puts something else
-first. Several remaining cases are not ranking failures at all:
+`uz-104` and `uz-110` are the hard misses. `uz-110` remains the clearest case of
+genuine paraphrase: it asks about liability for someone who did not understand
+their actions, and the article is titled «Невменяемость», which shares no
+vocabulary with any natural phrasing of the question.
 
-- **Ambiguous gold.** `uz-131` expects Civil Procedure art. 128 «Давлат божи»,
-  but art. 174 carries the *same title* in the same code. The benchmark item is
-  at fault, not the retriever.
-- **Act disambiguation.** `uz-007` expects art. 259 «Нарушение правил пожарной
-  безопасности» and gets art. 211 — the same offence title in a different code.
-  Choosing between them needs the question to say which code it means, and it
-  does not.
-- **Genuine paraphrase.** `uz-110` asks about liability for someone who did not
-  understand their actions; the article is titled «Невменяемость», which shares
-  no vocabulary with any natural phrasing.
-
-The first two suggest the benchmark needs tightening as much as the system does.
+`uz-007` is act disambiguation rather than retrieval — «Нарушение правил
+пожарной безопасности» exists in more than one code, and the question does not
+say which one it means. That one is arguably still a benchmark defect rather
+than a system one.
 
 ## What's been verified against the real running app
 

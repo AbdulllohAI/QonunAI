@@ -34,7 +34,7 @@ def _strip_label(heading: str | None) -> str:
 
 
 def fetch_corpus(base: str) -> dict:
-    with urlopen(f"{base.rstrip('/')}/api/v1/corpus/articles", timeout=120) as response:
+    with urlopen(f"{base.rstrip('/')}/api/v1/laws/articles", timeout=120) as response:
         return json.load(response)
 
 
@@ -43,8 +43,12 @@ def audit(items: list[dict], headings: dict, law_names: dict) -> list[str]:
     problems: list[str] = []
     for item in items:
         gold = item.get("gold_article")
-        if not gold:
-            continue  # out-of-scope and adversarial items carry no gold
+        if not gold or item.get("expect"):
+            # Out-of-scope items carry no gold, and items that expect a refusal
+            # name an article on purpose that the corpus must *not* contain —
+            # adv-001 asks about Criminal Code art. 999. Same rule the runner
+            # uses to decide what it scores.
+            continue
         act = item.get("act")
         if not act:
             problems.append(f"{item['id']}: has a gold article but no act to disambiguate it")
@@ -93,7 +97,7 @@ def main() -> int:
     law_names = {row["act_id"]: row["law_name"] for row in corpus["rows"]}
 
     problems = audit(items, headings, law_names)
-    scored = sum(1 for i in items if i.get("gold_article"))
+    scored = sum(1 for i in items if i.get("gold_article") and not i.get("expect"))
     for problem in problems:
         print(f"  {problem}")
     print(f"\n{scored} scored items, {len(problems)} problems")

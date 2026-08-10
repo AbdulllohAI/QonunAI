@@ -115,8 +115,10 @@ def run_retrieval(client: httpx.Client, base: str, items: list[dict[str, Any]]) 
 
         mark = "ok " if rank == 1 else ("~  " if rank and rank <= 5 else "MISS")
         top = hits[0] if hits else {}
+        gold = item["gold_article"]
+        gold_label = "/".join(str(g) for g in gold) if isinstance(gold, list) else str(gold)
         print(
-            f"  [{mark}] {item['id']:8s} gold={item['gold_article']:>4s} "
+            f"  [{mark}] {item['id']:8s} gold={gold_label:>6s} "
             f"rank={str(rank or '-'):>3s}  top={str(top.get('article_number')):>4s}"
         )
         if rank is None or rank > 5:
