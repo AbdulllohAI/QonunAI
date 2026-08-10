@@ -38,8 +38,9 @@ def test_expansion_only_adds():
 
 
 def test_multi_word_phrases_expand():
-    extra = expand_tokens(["ishdan", "bo'shash"])
-    assert any("mehnat shartnomasini bekor qilish" in e for e in extra)
+    """Tokens arrive already normalised, so the table must be keyed that way."""
+    extra = expand_tokens(["ishdan", "boshash"])
+    assert any("mehnat shartnomasini bekor qilish" in e for e in extra), extra
 
 
 def test_unknown_tokens_expand_to_nothing():
@@ -63,11 +64,24 @@ def test_synonym_reaches_the_cyrillic_corpus_form():
     assert any("ходим".startswith(t) for t in terms), sorted(terms)
 
 
-def test_reflexive_pronoun_is_not_a_content_word():
-    """"o'zi" matched "Ўзини ўзи ҳимоя қилиш" (self-defence) strongly enough to
-    take the top results for a question about resigning."""
-    terms = _terms("Ishchi o'zi ishdan bo'shamoqchi bo'lsa nima qiladi?", Language.UZ_LATN)
-    assert not any(t.startswith("ozi") or t.startswith("ўзи") for t in terms), sorted(terms)
+def test_reflexive_pronoun_carries_the_initiative_sense():
+    """"o'zi" looks like scaffolding and is not: "at the employee's own
+    initiative" is exactly what separates art. 160 from art. 166
+    (employer-initiated), so it is expanded rather than stripped."""
+    _, tsquery = build_tsquery(
+        "Ishchi o'zi ishdan bo'shamoqchi bo'lsa nima qiladi?", Language.UZ_LATN
+    )
+    assert "ташаббус" in tsquery, tsquery
+
+
+def test_multi_word_synonyms_are_valid_tsquery_terms():
+    """A space inside a tsquery term is a syntax error, and to_tsquery raising
+    takes down the whole branch through its except-and-return-[] handler."""
+    _, tsquery = build_tsquery("ish beruvchi kim?", Language.UZ_LATN)
+    for term in tsquery.split("|"):
+        term = term.strip()
+        if " " in term:
+            assert term.startswith("(") and "<->" in term, term
 
 
 # -------------------------------------------- what must NOT be conflated

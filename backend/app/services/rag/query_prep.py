@@ -45,15 +45,10 @@ _FRAMING: dict[str, frozenset[str]] = {
         "nega", "kim", "kimlar", "necha", "nechta", "qancha", "bo'ladi", "boladi",
         "boʻladi", "qilinadi", "tuziladi", "beriladi", "hisoblanadi", "deyiladi",
         "kerak", "mumkin", "uchun", "haqida", "bilan", "yoki", "va", "ham",
-        # Reflexive pronouns. "Ishchi o'zi ishdan bo'shasa..." is scaffolding,
-        # but "o'z"/"o'zi" matched "Ўзини ўзи ҳимоя қилиш" (self-defence) hard
-        # enough to take the top results for a question about resigning.
-        "o'z", "o'zi", "oz", "ozi", "o'zini", "ozini", "o'zining", "ozining",
         "қандай", "қанақа", "қайси", "қачон", "қаерда", "нима", "нималар",
         "нега", "ким", "кимлар", "неча", "нечта", "қанча", "бўлади", "қилинади",
         "тузилади", "берилади", "ҳисобланади", "дейилади", "керак", "мумкин",
         "учун", "ҳақида", "билан", "ёки", "ва", "ҳам",
-        "ўз", "ўзи", "ўзини", "ўзининг",
     }),
     "en": frozenset({
         "what", "which", "how", "when", "where", "why", "who", "whom", "whose",

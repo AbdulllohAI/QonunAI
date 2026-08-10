@@ -22,6 +22,7 @@ would move the query vector away from what the user actually wrote.
 from __future__ import annotations
 
 from app.services.lang.translit import latin_to_cyrillic
+from app.services.rag.query_prep import normalise_token
 
 __all__ = ["expand_tokens", "SYNONYM_GROUPS"]
 
@@ -40,6 +41,13 @@ SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
     # Leaving a job: the statute frames it as terminating the contract.
     frozenset({"ishdan bo'shash", "ishdan bo'shatish", "ishdan ketish",
                "ishdan chiqish", "mehnat shartnomasini bekor qilish"}),
+    # Voluntary resignation. The Labour Code frames it as termination "at the
+    # employee's initiative"; people say "I want to leave myself". This is the
+    # distinction between art. 160 and art. 166 (employer-initiated), so the
+    # "own initiative" sense is signal, not scaffolding — which is why the
+    # reflexive pronoun is expanded rather than stripped as framing.
+    frozenset({"o'z tashabbusi", "o'z xohishi", "o'z arizasi", "o'zi",
+               "xodimning tashabbusi", "ixtiyoriy"}),
     frozenset({"ish haqi", "oylik", "maosh"}),
     frozenset({"mehnat ta'tili", "ta'til"}),
     # --- Uzbek: general ---------------------------------------------------
@@ -50,6 +58,10 @@ SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
     frozenset({"работник", "сотрудник", "трудящийся"}),
     frozenset({"увольнение", "расторжение трудового договора",
                "прекращение трудового договора"}),
+    # Listed without the preposition too: "по" is stripped as framing before
+    # expansion runs, so a group keyed only on the full phrase never matches.
+    frozenset({"собственному желанию", "собственное желание",
+               "инициативе работника", "своей инициативе"}),
     frozenset({"заработная плата", "зарплата", "оплата труда"}),
     frozenset({"отпуск", "трудовой отпуск"}),
     # --- Russian: general -------------------------------------------------
@@ -60,15 +72,25 @@ SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
 )
 
 
+def _norm(term: str) -> str:
+    """Normalise a group entry exactly as query tokens are normalised.
+
+    Without this the table is keyed on "o'zi" while the query arrives as
+    "ozi" — the apostrophe having already been folded away — and the lookup
+    silently never matches.
+    """
+    return " ".join(normalise_token(w) for w in term.split())
+
+
 def _index() -> dict[str, frozenset[str]]:
     """Term -> the other members of its group, in both Uzbek scripts."""
     table: dict[str, frozenset[str]] = {}
     for group in SYNONYM_GROUPS:
         expanded: set[str] = set()
         for term in group:
-            expanded.add(term)
-            cyrillic = latin_to_cyrillic(term)
-            if cyrillic != term:
+            expanded.add(_norm(term))
+            cyrillic = _norm(latin_to_cyrillic(term))
+            if cyrillic:
                 expanded.add(cyrillic)
         for term in expanded:
             table[term] = frozenset(expanded - {term})

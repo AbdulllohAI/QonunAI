@@ -94,7 +94,22 @@ def build_tsquery(query: str, language: Language) -> tuple[str, str]:
                     tokens.append(token)
     if not tokens:
         tokens = [normalize(query).lower() or "x"]
-    return config, " | ".join(f"{t}:*" for t in tokens[:60])
+    return config, " | ".join(_as_tsquery_term(t) for t in tokens[:60])
+
+
+def _as_tsquery_term(token: str) -> str:
+    """Render one token as a tsquery term.
+
+    Multi-word synonyms ("ish beruvchi") cannot be emitted as `ish beruvchi:*`:
+    a space is a syntax error in tsquery, and `to_tsquery` raising takes down
+    the entire branch through its except-and-return-[] handler — silently, the
+    same failure mode that hid the dead dense branch. They become adjacency
+    phrases instead, which is also more precise than OR-ing the words apart.
+    """
+    words = token.split()
+    if len(words) == 1:
+        return f"{token}:*"
+    return "(" + " <-> ".join(words[:-1] + [f"{words[-1]}:*"]) + ")"
 
 
 class KeywordSearcher:
