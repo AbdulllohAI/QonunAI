@@ -125,6 +125,26 @@ class Settings(BaseSettings):
     """
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
 
+    RERANKER_BACKEND: Literal["local", "remote"] = "local"
+    """Where the cross-encoder runs.
+
+    "local" loads it into this process, which is simplest and was measured to
+    be unaffordable on shared CPU: the reranker and the query embedder contend
+    for the same cores behind a single uvicorn worker, turning a model that
+    scores 0.14s per pair in isolation into 40s per query in service.
+
+    "remote" calls a service that holds the model and nothing else, so the two
+    stop competing. It fails soft -- a slow or unreachable reranker degrades to
+    fusion order rather than failing the query -- but loudly, because a
+    reranker that silently never runs is how this system spent weeks claiming a
+    pipeline stage it did not have."""
+
+    RERANKER_URL: str = "http://uzlex-reranker.internal:8080"
+    RERANKER_TIMEOUT_S: float = 8.0
+    """Hard ceiling on a rerank call. Past this the fused order is good enough:
+    Recall@5 is 0.931 without any reranking, so waiting is worse than shipping
+    the order we already have."""
+
     RERANKER_TRUST_REMOTE_CODE: bool = False
     """Allow the reranker to execute Python fetched from its model repo.
 

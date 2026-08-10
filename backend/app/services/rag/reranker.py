@@ -70,7 +70,68 @@ class Reranker:
         """
         if not settings.RERANKER_ENABLED:
             return False
+        if settings.RERANKER_BACKEND == "remote":
+            # Nothing to load here; the model lives in the reranker service.
+            # Probe it so a misconfigured URL surfaces at boot rather than on
+            # the first user question.
+            return await self._probe_remote()
         return await self._get_model() is not None
+
+    async def _probe_remote(self) -> bool:
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                payload = (await client.get(f"{settings.RERANKER_URL}/health")).json()
+        except Exception as exc:  # noqa: BLE001
+            log.error(
+                "reranker_service_unreachable_using_fusion_order_only",
+                extra={"url": settings.RERANKER_URL, "error": str(exc)[:200]},
+            )
+            return False
+        if not payload.get("loaded"):
+            log.error(
+                "reranker_service_has_no_model",
+                extra={"url": settings.RERANKER_URL, "error": payload.get("error")},
+            )
+            return False
+        log.info("reranker_service_ready", extra={"model": payload.get("model")})
+        return True
+
+    async def _score_remote(self, query: str, passages: list[str]) -> list[float] | None:
+        """Scores from the reranker service, or None meaning "keep your order".
+
+        Every failure here is soft by design — the fused order already scores
+        Recall@5 = 0.931, so a reranker that cannot answer in time is not worth
+        failing a legal query over — but each one is logged at error level,
+        because a pipeline stage that silently stops running is precisely the
+        failure this codebase has already been bitten by.
+        """
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=settings.RERANKER_TIMEOUT_S) as client:
+                response = await client.post(
+                    f"{settings.RERANKER_URL}/rerank",
+                    json={"query": query, "passages": passages},
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except Exception as exc:  # noqa: BLE001
+            log.error(
+                "rerank_service_call_failed",
+                extra={"error": str(exc)[:200], "passages": len(passages)},
+            )
+            return None
+
+        scores = payload.get("scores") or []
+        if len(scores) != len(passages):
+            log.error(
+                "rerank_service_returned_wrong_length",
+                extra={"expected": len(passages), "got": len(scores)},
+            )
+            return None
+        return [float(s) for s in scores]
 
     async def rerank(
         self, query: str, chunks: Sequence[RetrievedChunk], top_k: int
@@ -80,20 +141,28 @@ class Reranker:
         if not settings.RERANKER_ENABLED:
             return list(chunks)[:top_k]
 
-        model = await self._get_model()
-        if model is None:
-            return list(chunks)[:top_k]
-
         # Include the citation line: it tells the cross-encoder which law the
         # passage belongs to, which the passage body often omits.
-        pairs = [[query, f"{c.citation}\n{c.heading or ''}\n{c.text}"] for c in chunks]
-        try:
-            scores = await asyncio.to_thread(
-                model.predict, pairs, batch_size=settings.EMBEDDING_BATCH_SIZE, show_progress_bar=False
-            )
-        except Exception as exc:
-            log.warning("rerank failed", extra={"error": str(exc)})
-            return list(chunks)[:top_k]
+        passages = [f"{c.citation}\n{c.heading or ''}\n{c.text}" for c in chunks]
+
+        if settings.RERANKER_BACKEND == "remote":
+            scores = await self._score_remote(query, passages)
+            if scores is None:
+                return list(chunks)[:top_k]
+        else:
+            model = await self._get_model()
+            if model is None:
+                return list(chunks)[:top_k]
+            try:
+                scores = await asyncio.to_thread(
+                    model.predict,
+                    [[query, passage] for passage in passages],
+                    batch_size=settings.EMBEDDING_BATCH_SIZE,
+                    show_progress_bar=False,
+                )
+            except Exception as exc:
+                log.error("rerank_failed", extra={"error": str(exc)[:200]})
+                return list(chunks)[:top_k]
 
         for chunk, score in zip(chunks, scores):
             chunk.rerank_score = _sigmoid(float(score))

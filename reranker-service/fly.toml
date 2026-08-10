@@ -1,0 +1,36 @@
+app = 'uzlex-reranker'
+primary_region = 'fra'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  RERANKER_MODEL = 'jinaai/jina-reranker-v2-base-multilingual'
+  RERANK_MAX_LENGTH = '320'
+  RERANK_BATCH_SIZE = '16'
+  RERANKER_TRUST_REMOTE_CODE = 'true'
+
+# No [http_service] block on purpose: that would allocate a public IP. This
+# service has no authentication because it is reachable only at
+# uzlex-reranker.internal over Fly's private network, and that is only true as
+# long as nothing publishes it.
+[[services]]
+  internal_port = 8080
+  protocol = 'tcp'
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  # Loading the cross-encoder costs far more than keeping it resident, and a
+  # suspended machine resumes from a memory snapshot with the model already in
+  # it — the whole point of separating this out is that the model stays warm.
+  min_machines_running = 1
+
+  [[services.tcp_checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '3m'
+
+[[vm]]
+  size = 'shared-cpu-4x'
+  memory = '4gb'
+  cpus = 4
+  memory_mb = 4096
