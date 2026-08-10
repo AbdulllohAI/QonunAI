@@ -13,8 +13,8 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
-[![Recall@5](https://img.shields.io/badge/Recall%405-1.000-2ea44f)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.928-2ea44f)](backend/benchmarks/)
+[![Recall@5](https://img.shields.io/badge/Recall%405-0.860-dfb317)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.791-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -353,105 +353,65 @@ in the committed config.
 ## 📊 Retrieval benchmark
 
 Quality claims are measured, not asserted. `uzlegal-v1`
-([`backend/benchmarks/`](backend/benchmarks/)) holds 30 in-scope questions whose
-gold article labels were read directly from `chunks.heading` in the production
-corpus and hand-verified, plus out-of-scope and adversarial items. A hit
-requires **both** the article number and the act to match, so a coincidental
-article 106 in the wrong code does not count.
+([`backend/benchmarks/`](backend/benchmarks/)) holds **57 scored questions**
+across **all 13 indexed acts** in Uzbek Latin, Uzbek Cyrillic and Russian, plus
+out-of-scope and adversarial items. Gold article numbers were read directly from
+`chunks.heading` in the production corpus and every `(act, article)` pair was
+validated against it before being added. Questions deliberately *paraphrase* the
+article's subject rather than restating its title, so the set does not simply
+reward the article-title branch.
+
+A hit requires **both** the article number and the act to match, so a
+coincidental article 106 in the wrong code does not count.
 
 ```bash
 python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --answers 0
 ```
 
-Retrieval runs through `/api/v1/search`, which exercises the full hybrid
-pipeline with no LLM call — so the expensive metric is free to measure.
+| Metric | Sparse only | With dense | + heading fixes | Current (57 q) | Target |
+|---|---|---|---|---|---|
+| Recall@1 | 0.600 | 0.733 | 0.767 | **0.719** | — |
+| Recall@3 | — | 0.867 | 0.933 | **0.860** | — |
+| Recall@5 | 0.833 | 0.867 | 0.933 | **0.860** | 0.90 |
+| Recall@10 | — | 0.933 | 1.000 | **0.912** | 0.95 |
+| MRR | 0.694 | 0.807 | 0.854 | **0.791** | 0.75 ✅ |
+| Median retrieval | 695 ms | 1276 ms | 1327 ms | 1347 ms | < 2000 ms |
 
-| Metric | First run | Sparse only | With dense | + heading fixes | + tuned fusion | Target |
-|---|---|---|---|---|---|---|
-| Recall@1 | 0.200 | 0.600 | 0.733 | 0.767 | **0.867** | — |
-| Recall@3 | — | — | 0.867 | 0.933 | **1.000** | — |
-| Recall@5 | 0.433 | 0.833 | 0.867 | 0.933 | **1.000** | 0.90 ✅ |
-| Recall@10 | — | — | 0.933 | 1.000 | **1.000** | 0.95 ✅ |
-| MRR | 0.294 | 0.694 | 0.807 | 0.854 | **0.928** | 0.75 ✅ |
-| Median retrieval | 431 ms | 695 ms | 1276 ms | 1327 ms | ~1300 ms | < 2000 ms |
+### Read this before trusting the earlier columns
 
-Every question retrieves its governing article in the top 3, and all targets are
-met. Four defects and one tuning pass closed the gap, each found by running the
-ranking function in Postgres against the real corpus rather than by reading code:
+The first four columns are **30 questions covering 4 acts**. On that set the
+system reached Recall@5 = 1.000 and MRR = 0.928. Expanding to 57 questions over
+all 13 acts dropped it to 0.860 and 0.791. The fusion constants had been swept
+against the 30-question set, and the 1.000 was substantially an artefact of
+that — which is what a benchmark that small will do to any parameter fitted to
+it. The current column is the honest number, and the constants have *not* been
+re-tuned against it, because doing so would just repeat the mistake at a larger
+size.
 
-1. **`ts_rank_cd` flags `2|8`** divided by document length *and* unique word
-   count. That double normalisation let the two-word chapter heading
-   «Меҳнат шартномаси» score 0.05 while art. 160's precise eight-word title —
-   which contains every query term — scored 0.006.
-2. **Structural headings were searchable.** Parts and chapters carry no article
-   number and can never be cited, but being short they were exactly what length
-   normalisation promoted.
-3. **Russian fleeting vowels broke prefix matching.** Postgres stems `сделкой`
-   to `сделк` but leaves `сделок` as `сделок`, and `сделк:*` is not a prefix of
-   `сделок` — so no question about сделки could reach the article titled
-   «Понятие сделок» at all. Verified directly: the `@@` operator returned false.
-4. **Branch-of-law qualifiers were treated as subject matter.** "по гражданскому
-   праву" names the branch, not the topic, and matched every «гражданских прав»
-   title. Stripped only in the oblique cases, so civil *rights* — a genuine
-   subject — is untouched.
-5. **`RRF_K = 60` flattened the top.** The canonical constant comes from fusing
-   dozens of TREC systems; with four branches it left rank 1 only ~13% ahead of
-   rank 10, so a chunk placing mid-table everywhere outscored one a branch
-   ranked first. Swept against the benchmark: `k=20`, heading weight `2.5`.
+Run-to-run variation is also real: two consecutive runs of this same
+configuration scored MRR 0.705 and 0.791, the first against a colder embedding
+cache. Single runs are indicative, not precise.
 
-These numbers come from 30 questions. A set that small will flatter any
-parameter tuned against it, so treat the fusion constants as fitted to this
-benchmark and re-check them if the corpus or the question mix changes.
+### Where it still fails
 
-Every question in the set now retrieves its governing article somewhere in the
-top 10, and all three targets are met. Three defects closed the last gap, each
-found by running the ranking function in Postgres against the real corpus
-rather than by reading code:
+The failures cluster, and the cluster is informative — **cross-script and
+cross-language retrieval**, where the question is in Uzbek Latin and the
+governing article exists only in Cyrillic or Russian:
 
-1. **`ts_rank_cd` flags `2|8`** divided by document length *and* unique word
-   count. That double normalisation let the two-word chapter heading
-   «Меҳнат шартномаси» score 0.05 while art. 160's precise eight-word title —
-   which contains every query term — scored 0.006.
-2. **Structural headings were searchable.** Parts and chapters carry no article
-   number and can never be cited, but being short they were exactly what length
-   normalisation promoted.
-3. **Russian fleeting vowels broke prefix matching.** Postgres stems `сделкой`
-   to `сделк` but leaves `сделок` as `сделок`, and `сделк:*` is not a prefix of
-   `сделок` — so no question about сделки could reach the article titled
-   «Понятие сделок» at all. Verified directly: the `@@` operator returned false.
+| Item | Question language | Gold act language | Result |
+|---|---|---|---|
+| uz-160 | uz-Latn | uz-Cyrl (Labour) | miss |
+| uz-161 | uz-Latn | uz-Cyrl (Tax) | rank 9 |
+| uz-171 | uz-Cyrl | ru (Civil) | miss |
+| uz-172 | uz-Latn | ru (Crim. Procedure) | miss |
 
-Run-to-run variation on a live service is real; treat single-run differences
-under ~0.03 as noise.
-
-Dense retrieval bought ranking quality more than raw coverage: the governing
-article is first for 73% of questions against 60% without it, and MRR clears
-its target. It also restored cross-language retrieval — see
-[Deployment status](#-deployment-status).
-
-Run-to-run variation on a live service is real; an earlier run of the same
-configuration scored MRR 0.774 / Recall@1 0.700 against a colder embedding
-cache. Treat single-run differences under ~0.03 as noise.
-
-Dense retrieval bought ranking quality rather than raw coverage: Recall@5 is
-unchanged, but the governing article is now first for 70% of questions instead
-of 60%, and MRR clears its target. It also restored cross-language retrieval —
-see [Deployment status](#-deployment-status).
-
-Three defects closed that gap, each found by measurement rather than reading code:
-
-1. **Prefix matching ran the wrong direction.** Uzbek has no Postgres stemmer, so
-   the sparse path emits `token:*` — but the prefix applies to the *query* token.
-   Someone typing `шаклда` could never reach an article titled `шакли`.
-2. **Article titles were searchable but drowned.** In nearly every failure the
-   answer sat in the title while hundreds of articles merely *mentioning* the
-   phrase outranked it. A heading-only branch with length-normalised ranking now
-   fuses in at 2× weight.
-3. **Sub-numbered articles were collapsed.** 57, 57¹ and 57² all stored as
-   `"57"` — legally distinct provisions sharing one identifier. 702 articles
-   were renumbered from the lex.uz table of contents.
-
-> **Note the rate limit.** A full run needs `RATE_LIMIT_ANON_PER_HOUR` above 20,
-> or requests start returning 429 around item 20 and score as misses.
+The sharpest case is uz-160 against uz-026: **the same article**, Labour Code
+160, asked twice. uz-026 uses *xodim* (the statute's word) and lands at rank 1;
+uz-160 uses *ishchi*, an ordinary synonym, and misses entirely. Transliteration
+bridges scripts and the embedding bridges languages, but neither reliably
+bridges a synonym the statute does not use — which is exactly how a non-lawyer
+phrases a question. That is the next thing worth fixing, and it is a corpus and
+query-expansion problem rather than a ranking one.
 
 ## What's been verified against the real running app
 

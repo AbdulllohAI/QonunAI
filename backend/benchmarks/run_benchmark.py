@@ -45,12 +45,25 @@ def load_items(path: Path) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))["items"]
 
 
-def _act_matches(hit_law: str, expected_act: str | None) -> bool:
+def _act_matches(hit_law: str, expected_act: str | list[str] | None) -> bool:
     """Loose containment — the benchmark stores a short act fragment, the corpus
-    stores the full dated title."""
+    stores the full dated title.
+
+    A list means any of several acts is acceptable, which is needed where the
+    same provision exists in more than one act: Criminal Code art. 97 is
+    "Умышленное убийство" in the Russian act and "Qasddan odam o'ldirish" in the
+    Latin one, the same law in two scripts. Scoring only one of them would mark
+    a correct answer wrong for having answered in the user's own language.
+
+    This is deliberately not the default. Art. 96 is "Место допроса" in the
+    Criminal Procedure Code and something unrelated in the Criminal Code, so
+    most items must still pin exactly one act.
+    """
     if not expected_act:
         return True
-    return expected_act.lower() in (hit_law or "").lower()
+    fragments = [expected_act] if isinstance(expected_act, str) else expected_act
+    law = (hit_law or "").lower()
+    return any(f.lower() in law for f in fragments)
 
 
 def rank_of_gold(hits: list[dict[str, Any]], item: dict[str, Any]) -> int | None:
