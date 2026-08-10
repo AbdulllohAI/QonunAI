@@ -61,8 +61,18 @@
       "lang": "ru",
       "act": "Уголовный кодекс",
       "gold_article": "259",
-      "question": "Какая ответственность за нарушение правил пожарной безопасности?",
-      "category": "criminal/offences"
+      "question": "Какая уголовная ответственность предусмотрена за нарушение правил пожарной безопасности?",
+      "category": "criminal/offences",
+      "note": "The Criminal Code (art. 259) and the Code of Administrative Responsibility (art. 211) carry the identical title 'Нарушение правил пожарной безопасности'. The original question asked only about 'ответственность' and so had no single correct answer; naming the kind of liability makes it a real test of choosing between two codes rather than an arbitrary label."
+    },
+    {
+      "id": "uz-007a",
+      "lang": "ru",
+      "act": "об административной",
+      "gold_article": "211",
+      "question": "Какая административная ответственность предусмотрена за нарушение правил пожарной безопасности?",
+      "category": "admin/fire-safety",
+      "note": "Mirror of uz-007. The same offence title exists in both codes, so testing only one direction would not show whether the system distinguishes them or simply prefers one code."
     },
     {
       "id": "uz-008",

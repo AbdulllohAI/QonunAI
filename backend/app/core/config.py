@@ -74,6 +74,14 @@ class Settings(BaseSettings):
 
     HEADING_RRF_WEIGHT: float = 2.5
 
+    ACT_NAME_AFFINITY_WEIGHT: float = 0.10
+    """Weight of the act-name signal added to the fused score.
+
+    Distinguishes codes that contain identically titled articles: "Нарушение
+    правил пожарной безопасности" exists in both the Criminal Code and the Code
+    of Administrative Responsibility, and only the name of the containing act
+    says which liability applies."""
+
     TITLE_AFFINITY_WEIGHT: float = 0.15
     """Weight of the title-precision tiebreaker added to the fused score.
 

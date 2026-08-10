@@ -7,7 +7,7 @@ improvements). These tests pin the ordering decisions that gap turns on.
 """
 from __future__ import annotations
 
-from app.services.rag.title_affinity import title_affinity
+from app.services.rag.title_affinity import act_affinity, title_affinity
 
 
 def test_the_article_that_governs_beats_the_one_about_its_consequences():
@@ -89,3 +89,37 @@ def test_long_title_containing_the_query_scores_below_an_exact_one():
         q, "131-modda. Даъвонинг баҳоси ўзгартирилганда давлат божи қайта ҳисобланади", "uz-Cyrl"
     )
     assert exact > padded
+
+
+# ------------------------------------------------------- act disambiguation
+
+CRIMINAL = "22.09.1994. Уголовный кодекс Республики Узбекистан"
+ADMIN = "22.09.1994. Кодекс Республики Узбекистан об административной ответственности"
+
+
+def test_naming_the_liability_selects_the_code():
+    """Both codes contain "Нарушение правил пожарной безопасности"; only the
+    act name says which liability applies."""
+    q = "Какая уголовная ответственность предусмотрена за нарушение правил пожарной безопасности?"
+    assert act_affinity(q, CRIMINAL, "ru") > act_affinity(q, ADMIN, "ru")
+
+
+def test_the_mirror_case_selects_the_other_code():
+    q = "Какая административная ответственность предусмотрена за нарушение правил пожарной безопасности?"
+    assert act_affinity(q, ADMIN, "ru") > act_affinity(q, CRIMINAL, "ru")
+
+
+def test_shared_boilerplate_carries_no_signal():
+    """"ответственность" is in the administrative code's own title. Counting it
+    would pull every liability question toward that code."""
+    q = "Какая ответственность за это предусмотрена?"
+    assert act_affinity(q, ADMIN, "ru") == 0.0
+
+
+def test_a_question_naming_no_code_prefers_neither():
+    q = "Что грозит за нарушение правил пожарной безопасности?"
+    assert act_affinity(q, CRIMINAL, "ru") == act_affinity(q, ADMIN, "ru") == 0.0
+
+
+def test_missing_act_name_is_zero():
+    assert act_affinity("уголовная ответственность", None, "ru") == 0.0

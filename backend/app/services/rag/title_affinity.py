@@ -26,7 +26,7 @@ from __future__ import annotations
 from app.services.lang.translit import latin_to_cyrillic
 from app.services.rag.query_prep import content_tokens
 
-__all__ = ["title_affinity"]
+__all__ = ["title_affinity", "act_affinity"]
 
 #: Shared leading characters required to treat two words as the same term.
 #: Matches the threshold the tsquery builder already uses, and is what lets
@@ -93,3 +93,40 @@ def title_affinity(query: str, heading: str | None, language_value: str) -> floa
     covers_query = matched_query / len(query_terms)
     covers_title = matched_title / len(title_terms)
     return 2 * covers_query * covers_title / (covers_query + covers_title)
+
+
+#: Words that appear in nearly every act name and so carry no signal about
+#: *which* act is meant. Without excluding them, "ответственность" in a question
+#: matches the Code of Administrative Responsibility's own title and pulls every
+#: liability question toward that code regardless of what was asked.
+_ACT_NAME_NOISE = frozenset({
+    "кодекс", "кодекса", "кодексе", "кодекси", "кодексининг",
+    "республики", "республикаси", "республикасининг", "узбекистан",
+    "ўзбекистон", "uzbekiston", "respublikasining", "kodeksi",
+    "ответственности", "ответственность", "javobgarlik",
+})
+
+
+def act_affinity(query: str, law_name: str | None, language_value: str) -> float:
+    """0..1 — how strongly the question names the act a candidate comes from.
+
+    The Criminal Code and the Code of Administrative Responsibility both contain
+    an article titled "Нарушение правил пожарной безопасности". Nothing in
+    either article's text or title says which liability it imposes; the only
+    thing that distinguishes them is the name of the code they sit in, and
+    retrieval never looked there. Asked about *уголовная* liability for a fire
+    safety breach, the system returned the administrative article first.
+
+    Scored one-directionally, as coverage of the act name's distinctive words.
+    The reverse would be meaningless: act names are mostly dates and boilerplate
+    that no question would ever repeat.
+    """
+    if not law_name:
+        return 0.0
+    name_terms = [t for t in _terms(law_name, language_value) if t not in _ACT_NAME_NOISE]
+    query_terms = _terms(query, language_value)
+    if not name_terms or not query_terms:
+        return 0.0
+
+    matched = sum(1 for t in name_terms if any(_same_term(t, q) for q in query_terms))
+    return matched / len(name_terms)

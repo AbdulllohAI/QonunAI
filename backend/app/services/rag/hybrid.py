@@ -42,7 +42,7 @@ from app.services.rag.keyword import (
     keyword_searcher,
 )
 from app.services.rag.reranker import reranker
-from app.services.rag.title_affinity import title_affinity
+from app.services.rag.title_affinity import act_affinity, title_affinity
 from app.services.rag.types import RetrievalResult, RetrievedChunk
 from app.services.rag.vector_store import vector_store
 
@@ -160,6 +160,11 @@ class HybridRetriever:
             for chunk in reranked:
                 chunk.fused_score += settings.TITLE_AFFINITY_WEIGHT * title_affinity(
                     query, chunk.heading, lang_value
+                )
+                # Which code the article sits in is sometimes the only thing
+                # separating two identically titled provisions.
+                chunk.fused_score += settings.ACT_NAME_AFFINITY_WEIGHT * act_affinity(
+                    query, chunk.law_name, lang_value
                 )
             reranked.sort(key=lambda c: c.score, reverse=True)
 
