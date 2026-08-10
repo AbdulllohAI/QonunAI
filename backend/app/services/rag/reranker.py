@@ -33,11 +33,19 @@ class Reranker:
                         from sentence_transformers import CrossEncoder
 
                         log.info("loading reranker", extra={"model": settings.RERANKER_MODEL})
+                        kwargs = {
+                            "device": settings.EMBEDDING_DEVICE,
+                            "max_length": settings.RERANK_MAX_LENGTH,
+                        }
+                        if settings.RERANKER_TRUST_REMOTE_CODE:
+                            # Executes code from the model repo. See the setting.
+                            kwargs["trust_remote_code"] = True
+                            log.warning(
+                                "reranker_trusting_remote_code",
+                                extra={"model": settings.RERANKER_MODEL},
+                            )
                         self._model = await asyncio.to_thread(
-                            CrossEncoder,
-                            settings.RERANKER_MODEL,
-                            device=settings.EMBEDDING_DEVICE,
-                            max_length=settings.RERANK_MAX_LENGTH,
+                            CrossEncoder, settings.RERANKER_MODEL, **kwargs
                         )
                     except Exception as exc:
                         # Degrade to fusion-only ranking rather than failing the

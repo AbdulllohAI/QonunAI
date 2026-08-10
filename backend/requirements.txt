@@ -45,3 +45,6 @@ openai==1.59.6
 # queries could not be, so the dense branch raised on every request and the
 # hybrid retriever silently ran on keyword search alone.
 sentence-transformers==3.3.1
+# jina-reranker-v2's custom modelling code imports einops; without it the model
+# fails to load and the reranker silently degrades to fusion-only ordering.
+einops==0.8.0

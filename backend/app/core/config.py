@@ -124,6 +124,16 @@ class Settings(BaseSettings):
     tokens ~10x the cost of 320.
     """
     RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
+
+    RERANKER_TRUST_REMOTE_CODE: bool = False
+    """Allow the reranker to execute Python fetched from its model repo.
+
+    Off by default, and deliberately a separate switch from RERANKER_MODEL.
+    Some rerankers -- jina-reranker-v2-base-multilingual among them -- ship
+    custom modelling code that transformers will only run with this enabled,
+    which means loading the model executes code from a third party inside the
+    service. That is a decision worth making explicitly rather than inheriting
+    from a model name."""
     RERANKER_ENABLED: bool = True
 
     DENSE_RETRIEVAL_ENABLED: bool = True
