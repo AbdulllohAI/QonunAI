@@ -43,6 +43,49 @@ async def list_acts(
     return list(rows.scalars())
 
 
+@router.get("/articles")
+async def article_index(session: AsyncSession = Depends(get_session)):
+    """Every article number and title in the corpus, grouped by act.
+
+    Exists so the benchmark's gold labels can be checked against the corpus
+    they claim to describe (`benchmarks/audit_gold.py`). A benchmark can be
+    wrong in ways that look exactly like the system being wrong: four items
+    named a gold article whose title was shared by another article in the same
+    act, and retrieval was marked incorrect for returning an equally correct
+    provision.
+
+    Public because the content is published legislation, and the index is what
+    makes the benchmark's provenance claims auditable by someone who does not
+    have database access.
+    """
+    from app.db.models import Chunk
+
+    rows = await session.execute(
+        select(
+            Chunk.act_id,
+            Chunk.article_number,
+            Chunk.heading,
+            Chunk.language,
+            Chunk.law_name,
+        )
+        .where(Chunk.article_number.isnot(None))
+        .where(Chunk.heading.isnot(None))
+        .distinct()
+    )
+    return {
+        "rows": [
+            {
+                "act_id": str(act_id),
+                "article_number": article_number,
+                "heading": heading,
+                "language": language.value if language else None,
+                "law_name": law_name,
+            }
+            for act_id, article_number, heading, language, law_name in rows
+        ]
+    }
+
+
 @router.get("/stats")
 async def corpus_stats(session: AsyncSession = Depends(get_session)):
     from app.db.models import Chunk

@@ -72,9 +72,16 @@ def rank_of_gold(hits: list[dict[str, Any]], item: dict[str, Any]) -> int | None
     Both the article number and the act must match: article 106 of the Civil
     Code is not a correct hit for a question about article 106 of the Labour
     Code, and matching on number alone would score that as success.
+
+    `gold_article` may be a list, for the cases where the corpus genuinely
+    carries the same provision under two numbers — Criminal Code articles 73
+    and 89 are both titled "Условно-досрочное освобождение от отбывания
+    наказания". Marking either one wrong would penalise a correct answer.
     """
+    gold = item["gold_article"]
+    accepted = {str(g) for g in (gold if isinstance(gold, list) else [gold])}
     for i, h in enumerate(hits, start=1):
-        if str(h.get("article_number")) == str(item["gold_article"]) and _act_matches(
+        if str(h.get("article_number")) in accepted and _act_matches(
             h.get("law_name", ""), item.get("act")
         ):
             return i

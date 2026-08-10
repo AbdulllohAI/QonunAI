@@ -2,7 +2,7 @@
   "name": "uzlegal-v1",
   "description": "Retrieval benchmark for Uzbek legal QA. Covers all 13 indexed acts across Uzbek Latin, Uzbek Cyrillic, Russian and English, including cross-script and cross-language items where the answer exists only in another language.",
   "created": "2026-08-04",
-  "gold_provenance": "Article numbers and headings read directly from chunks.heading in the production corpus; questions were written from those headings, not the reverse. Questions deliberately paraphrase the article's subject rather than restating its title, so the set does not simply reward the article-title branch. Every gold (act, article) pair was validated against the corpus before being added.",
+  "gold_provenance": "Article numbers and headings read directly from chunks.heading in the production corpus; questions were written from those headings, not the reverse. Questions deliberately paraphrase the article's subject rather than restating its title, so the set does not simply reward the article-title branch. Every gold (act, article) pair was validated against the corpus before being added. Gold labels were then audited for ambiguity against the corpus: any item whose gold article shared its title with another article in the same act was either given both articles as acceptable, or replaced when the question was too generic to have a single answer.",
   "items": [
     {
       "id": "uz-001",
@@ -32,9 +32,13 @@
       "id": "uz-004",
       "lang": "ru",
       "act": "Уголовный кодекс",
-      "gold_article": "89",
+      "gold_article": [
+        "73",
+        "89"
+      ],
       "question": "Каковы условия условно-досрочного освобождения от отбывания наказания?",
-      "category": "criminal/procedure"
+      "category": "criminal/procedure",
+      "note": "Criminal Code arts. 73 and 89 carry the identical title 'Условно-досрочное освобождение от отбывания наказания'; the question does not distinguish them, so both are accepted."
     },
     {
       "id": "uz-005",
@@ -344,9 +348,10 @@
       "id": "uz-104",
       "lang": "uz-Latn",
       "act": "Солиқ кодекси",
-      "gold_article": "410",
-      "question": "Kim soliq to‘lovchi hisoblanadi?",
-      "category": "tax/subjects"
+      "gold_article": "213",
+      "question": "Qanday hollarda soliq javobgarligiga tortilmaydi?",
+      "category": "tax/liability",
+      "note": "Replaced: the previous question targeted art. 410 'Солиқ тўловчилар', a title the Tax Code carries 14 times, once per tax type."
     },
     {
       "id": "uz-110",
@@ -416,9 +421,13 @@
       "id": "uz-131",
       "lang": "uz-Latn",
       "act": "Фуқаролик процессуал",
-      "gold_article": "128",
+      "gold_article": [
+        "128",
+        "174"
+      ],
       "question": "Sudga murojaat qilganda qancha davlat boji to‘lanadi?",
-      "category": "civilproc/fees"
+      "category": "civilproc/fees",
+      "note": "Civil Procedure arts. 128 and 174 are both titled 'Давлат божи'; either is a correct answer to a question about the state duty."
     },
     {
       "id": "uz-132",
@@ -496,9 +505,10 @@
       "id": "uz-161",
       "lang": "uz-Latn",
       "act": "Солиқ кодекси",
-      "gold_article": "432",
-      "question": "Soliqni qanday to‘lash kerak?",
-      "category": "tax/payment"
+      "gold_article": "141",
+      "question": "Soliq auditi qancha vaqt davom etishi mumkin?",
+      "category": "tax/audit",
+      "note": "Replaced: the previous question targeted art. 432 'Солиқни тўлаш тартиби', a title repeated per tax type."
     },
     {
       "id": "uz-162",
