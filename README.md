@@ -314,52 +314,54 @@ returned four results and never reached Criminal Code art. 137. It now returns
 eleven and ranks art. 137 by embedding similarity (0.60). Benchmark-wide, MRR
 went from 0.694 to 0.807 and Recall@1 from 0.600 to 0.733.
 
-### Why reranking is still off
+### Why reranking is off: the arithmetic
 
-Three cross-encoders were tried against the 58-question benchmark. All were
-reverted, and the reason changed as the search narrowed.
+Reranking was pursued through three models and two architectures. It is off,
+and the reason is not tuning.
 
-| Model | Multilingual | Score spread | Latency in service |
-|---|---|---|---|
-| `bge-reranker-v2-m3` (568M) | yes | — | 71 s at 30×1024 |
-| `bge-reranker-base` (278M) | **no** (zh/en) | 0.5000, 0.5027, 0.5042 | 16.7 s median |
-| `jina-reranker-v2-base-multilingual` (278M) | yes | 0.64, 0.60, 0.59 | 40 s+, then unusable |
+**Model selection.** `bge-reranker-base` (278M) is small enough but trained on
+Chinese and English only — against Russian its scores clustered at 0.5000,
+0.5027, 0.5042, and sigmoid(0) is exactly 0.5, so it was emitting near-zero
+logits and reordering by noise. Recall@1 fell 0.793 → 0.569.
+`jina-reranker-v2-base-multilingual` (278M) is the right model: genuinely
+multilingual, and it scores «Понятие сделок» 0.32 against 0.13 for an unrelated
+article.
 
-`bge-reranker-base` failed on **quality**. Its scores clustered at 0.5, and
-sigmoid(0) is exactly 0.5 — it was emitting near-zero logits, having no opinion
-on Russian text. Reordering by noise is worse than not reordering: Recall@1 fell
-from 0.793 to 0.569 and MRR below target for the only time since dense
-retrieval was enabled.
+**Architecture.** Run in-process the reranker contends with the query embedder
+for the same cores behind one uvicorn worker — 40s per query, then nothing
+completing. So it now runs as [its own service](reranker-service/), reachable
+only at `uzlex-reranker.internal`, and that part works: the service loads, the
+scores discriminate, and the client degrades to fused order when it cannot
+answer.
 
-`jina-reranker-v2-base-multilingual` is the right model. It is 278M *and*
-genuinely multilingual, the combination BGE does not offer, and its scores
-discriminate properly — asked what a transaction is, it scored «Понятие
-сделок» 0.32 against 0.13 for an unrelated bribery article. Loaded in an
-isolated process **on the production machine** it also ran at roughly 0.14 s per
-pair, which is about 1.7 s for a full 12-candidate rerank.
+**It still does not help, and the reason is arithmetic.** A transformer forward
+pass costs roughly `2 × params × tokens`. For 12 candidates at 96 tokens
+against a 278M model that is about 640 GFLOP. Two dedicated CPU cores deliver
+on the order of 50 GFLOPS, so ~13 seconds — which is exactly what was measured:
 
-Inside the running service the same model took 40 s per query and then stopped
-completing them. That difference is the actual finding: the blocker is not the
-model but the host. One `shared-cpu-4x` machine runs a 568M embedder and a
-278M cross-encoder in a single Python process with one uvicorn worker, so the
-reranker competes with query embedding for the same cores and serialises behind
-every other request.
+| Passages × tokens | shared-cpu-4x | performance-2x |
+|---|---|---|
+| 12 × 96 | — | 13.0 s |
+| 12 × 320 | 272 s | 26.0 s |
+| 8 × 320 | 75 s | — |
+| 4 × 320 | 8.8 s | 19.7 s (cold) |
 
-So the honest options are infrastructure, not model selection:
+The superlinear blow-up on shared CPU is throttling; the dedicated-CPU numbers
+are the real cost. Reaching a ~1s rerank needs roughly 15× more compute. That
+is a GPU, where the same work is milliseconds — not a smaller model, a shorter
+sequence, or a different host size.
 
-- a GPU machine, where `bge-reranker-v2-m3` becomes trivially affordable; or
-- the reranker as a **separate service** with its own CPU, so it stops competing
-  with embedding; or
-- leave it off, which is what the numbers currently favour.
+Retrieval currently answers in ~2.1s with Recall@5 = 0.931 and Recall@10 =
+0.983 without reranking at all. Paying 13s for a possible reordering of results
+that are already correct 93% of the time is not a trade worth making.
 
-`RERANKER_MODEL`, `RERANKER_TRUST_REMOTE_CODE`, `RERANK_CANDIDATE_CAP` and
-`RERANK_MAX_LENGTH` are all settings, so any of these needs no code change.
-
-One operational note learned the hard way: `flyctl secrets set` replaces the
-machine, which wipes the ephemeral `/models` cache and forces a full
-re-download of every model on the next boot. That is why `PREFETCH_MODELS`
-exists — and why it is off, since baking the weights in produces an image too
-large for Fly to deploy (above).
+**The service is kept, scaled to zero.** `flyctl scale count 1 -a
+uzlex-reranker` brings it back; on a GPU machine it becomes immediately
+worthwhile, and `RERANKER_BACKEND=remote` on the main app is all that is needed
+to use it. Two details in it are worth not rediscovering: bind `::` rather than
+`0.0.0.0`, because Fly's private network is IPv6-only and a service on the IPv4
+wildcard resolves and then refuses every connection; and Fly allocates public
+IPs on app creation, which must be released for a service that carries no auth.
 
 ### Current production configuration
 
