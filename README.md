@@ -13,8 +13,8 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
 [![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
-[![Recall@5](https://img.shields.io/badge/Recall%405-0.877-dfb317)](backend/benchmarks/)
-[![MRR](https://img.shields.io/badge/MRR-0.795-2ea44f)](backend/benchmarks/)
+[![Recall@5](https://img.shields.io/badge/Recall%405-0.912-2ea44f)](backend/benchmarks/)
+[![MRR](https://img.shields.io/badge/MRR-0.808-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 </div>
@@ -371,11 +371,11 @@ python backend/benchmarks/run_benchmark.py --base https://uzlex-ai.fly.dev --ans
 | Metric | Sparse only | With dense | + heading fixes | Current (57 q) | Target |
 |---|---|---|---|---|---|
 | Recall@1 | 0.600 | 0.733 | 0.767 | **0.719** | — |
-| Recall@3 | — | 0.867 | 0.933 | **0.860** | — |
-| Recall@5 | 0.833 | 0.867 | 0.933 | **0.877** | 0.90 |
-| Recall@10 | — | 0.933 | 1.000 | **0.930** | 0.95 |
-| MRR | 0.694 | 0.807 | 0.854 | **0.795** | 0.75 ✅ |
-| Median retrieval | 695 ms | 1276 ms | 1327 ms | 1347 ms | < 2000 ms |
+| Recall@3 | — | 0.867 | 0.933 | **0.877** | — |
+| Recall@5 | 0.833 | 0.867 | 0.933 | **0.912** | 0.90 ✅ |
+| Recall@10 | — | 0.933 | 1.000 | **0.965** | 0.95 ✅ |
+| MRR | 0.694 | 0.807 | 0.854 | **0.808** | 0.75 ✅ |
+| Median retrieval | 695 ms | 1276 ms | 1327 ms | 1441 ms | < 2000 ms |
 
 ### Read this before trusting the earlier columns
 
@@ -432,15 +432,46 @@ Aggregate movement was small — Recall@5 0.860 → 0.877, MRR 0.791 → 0.795 �
 is within the run-to-run variance noted above, so the targeted fix is verified
 directly rather than inferred from the totals.
 
+### Crossing between Uzbek and Russian
+
+43% of this corpus is Russian-only, and nothing lexical connects Russian to
+Uzbek — so a question asked in Uzbek could not reach those acts through the
+keyword branches *at all*. Dense retrieval was the only bridge, and bge-m3's
+Uzbek is the weakest part of its multilingual coverage. Measured: *"Битим деб
+нима тушунилади?"* never reached Civil Code art. 101 «Понятие сделок», and
+*"So'roq qayerda o'tkaziladi?"* never reached Criminal Procedure art. 96 «Место
+допроса».
+
+Legal terminology is a closed vocabulary, which makes a glossary a workable
+bridge where a general bilingual dictionary would not be. Roughly thirty pairs
+now connect the two languages, each a term of art with one settled counterpart.
+
+The glossary must not become a back channel for merging terms the codes
+distinguish, so `bitim`/`сделка` and `shartnoma`/`договор` remain separate
+groups and a test asserts that in both directions.
+
+| Item | Question | Gold act | Before | After |
+|---|---|---|---|---|
+| uz-171 | Uzbek Cyrillic | Civil Code (ru) | miss | **rank 2** |
+| uz-172 | Uzbek Latin | Crim. Procedure (ru) | miss | **rank 4** |
+
+Recall@5 went 0.877 → 0.912 and Recall@10 0.930 → 0.965, both clearing target
+on the 57-question set. Median retrieval rose from 1327 ms to 1441 ms — the
+expanded term list costs something, and it stays well inside budget.
+
 ### Where it still fails
 
-Cross-language retrieval, where the question is in one language and the
-governing article exists only in another, remains the weak area: `uz-171`
-(Uzbek Cyrillic question, Russian-only Civil Code) and `uz-172` (Uzbek Latin,
-Russian-only Criminal Procedure Code) are still hard misses. Synonym expansion
-does not help there, because the gap is not vocabulary within a language but
-the absence of any lexical bridge between them — which leaves dense retrieval,
-and bge-m3's Uzbek is the weakest part of its multilingual coverage.
+Four items remain outside the top five, and they no longer share a single
+cause: `uz-110` (an administrative-liability question whose article title,
+«Невменяемость», shares no vocabulary with how anyone would phrase it),
+`uz-130`, `uz-150` and `uz-161`. These look like the ordinary long tail of
+paraphrase rather than a structural gap, which is a better place to be than the
+systematic failures the earlier rounds exposed.
+
+Recall@1 has been flat at 0.719 across the last three changes. Every fix so far
+has improved the system's ability to *find* the governing article; putting it
+first more often is a reranking problem, and cross-encoder reranking is
+currently disabled for latency (above).
 
 ## What's been verified against the real running app
 
