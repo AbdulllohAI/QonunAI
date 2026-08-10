@@ -135,3 +135,35 @@ def test_bridge_keeps_contract_and_transaction_apart_across_languages():
     Civil Code distinguishes."""
     assert "договор" not in expand_tokens(["bitim"])
     assert "сделка" not in expand_tokens(["shartnoma"])
+
+
+# --------------------------------------------- terms of art vs lay phrasing
+
+def test_lay_description_reaches_the_legal_doctrine():
+    """The Criminal Code defines "невменяемость" as being unable to understand
+    the significance of one's actions — which is how a non-lawyer says it."""
+    from app.services.rag.query_prep import content_tokens
+
+    tokens = content_tokens(
+        "Отвечает ли человек, который не понимал своих действий из-за болезни?", "ru"
+    )
+    assert "невменяемость" in expand_tokens(tokens)
+
+
+def test_admissibility_bridges_to_ordinary_wording():
+    from app.services.rag.query_prep import content_tokens
+
+    tokens = content_tokens("Қандай далиллар судда қабул қилинади?", "uz-Cyrl")
+    assert any("мақбул" in t for t in expand_tokens(tokens))
+
+
+def test_expansion_only_ever_adds_candidates():
+    """Terms of art widen the net; they never remove what the user typed, so a
+    question about adopting a law keeps its own words even though "qabul" also
+    carries the admissibility sense."""
+    from app.services.rag.query_prep import content_tokens
+
+    tokens = content_tokens("Qonun qanday qabul qilinadi?", "uz-Latn")
+    extra = expand_tokens(tokens)
+    assert "qonun" in tokens
+    assert all(t not in extra for t in tokens)

@@ -55,6 +55,15 @@ SYNONYM_GROUPS: tuple[frozenset[str], ...] = (
     # --- Uzbek: general ---------------------------------------------------
     frozenset({"jazo", "jazolash", "наказание", "мера наказания"}),
     frozenset({"jarima", "pul jarimasi", "штраф", "денежное взыскание"}),
+    # --- terms of art and their lay phrasing ------------------------------
+    # People describe the situation; the statute names the doctrine. These are
+    # the same relation as xodim/ishchi, not benchmark-specific patches: the
+    # Criminal Code defines "невменяемость" as being unable to understand the
+    # significance of one's actions, which is exactly how a non-lawyer puts it.
+    frozenset({"невменяемость", "психическое расстройство",
+               "понимал своих действий", "понимать значение своих действий"}),
+    # Admissibility: the code says "мақбуллик", people say "қабул қилинади".
+    frozenset({"maqbul", "maqbullik", "qabul"}),
     frozenset({"javobgarlik", "mas'uliyat", "ответственность",
                "юридическая ответственность"}),
     # --- Russian: employment ----------------------------------------------
