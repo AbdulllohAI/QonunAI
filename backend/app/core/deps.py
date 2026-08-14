@@ -21,8 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger, user_id_ctx
 from app.core.security import decode_token
-from app.db.models import User, UserRole
+from app.db.models import PlanTier, User, UserRole
 from app.db.session import get_session
+from app.services.billing import payme as billing_payme
 
 log = get_logger(__name__)
 
@@ -108,13 +109,20 @@ class RateLimiter:
         self.user = user or settings.RATE_LIMIT_USER
 
     async def __call__(
-        self, request: Request, user: User | None = Depends(get_optional_user)
+        self,
+        request: Request,
+        user: User | None = Depends(get_optional_user),
+        session: AsyncSession = Depends(get_session),
     ) -> None:
         if user and user.role is UserRole.ADMIN:
             return
 
         identity = str(user.id) if user else _client_ip(request)
-        limit = self.user if user else self.anon
+        limit = self.anon
+        if user:
+            limit = self.user
+            if await _is_pro(session, user.id):
+                limit = settings.RATE_LIMIT_PRO
         seconds = settings.RATE_LIMIT_WINDOW_SECONDS
         window = int(time.time() // seconds)
         key = f"rl:{window}:{identity}"
@@ -139,6 +147,44 @@ class RateLimiter:
                 detail=f"rate limit exceeded ({limit}/{_window_label(seconds)})",
                 headers={"Retry-After": str(retry_after)},
             )
+
+
+#: How long a tier lookup is trusted. A paid subscription does not change
+#: mid-minute, and without this every request pays a database round trip just
+#: to learn something that was true a second ago. The cost of the cache is that
+#: an expiry or a refund takes up to a minute to bite, which is the right trade
+#: in that direction — briefly generous, never briefly wrong the other way.
+_TIER_CACHE_SECONDS = 60
+
+
+async def _is_pro(session: AsyncSession, user_id: uuid.UUID) -> bool:
+    """Whether the user holds an active subscription, cached briefly.
+
+    Fails towards the free tier: if Redis or the database is unreachable we
+    would rather under-serve a paying customer for a moment than hand the
+    higher quota to everyone during an outage.
+    """
+    key = f"tier:{user_id}"
+    try:
+        redis = get_redis()
+        cached = await redis.get(key)
+        if cached is not None:
+            return cached == "pro"
+    except Exception:
+        pass  # Cache is an optimisation; fall through to the database.
+
+    try:
+        tier = await billing_payme.active_tier(session, user_id)
+        is_pro = tier is PlanTier.PRO
+    except Exception as exc:  # noqa: BLE001
+        log.warning("tier lookup failed", extra={"error": str(exc)[:200]})
+        return False
+
+    try:
+        await get_redis().setex(key, _TIER_CACHE_SECONDS, "pro" if is_pro else "free")
+    except Exception:
+        pass
+    return is_pro
 
 
 rate_limit = RateLimiter()

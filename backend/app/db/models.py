@@ -17,6 +17,7 @@ from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Date,
     DateTime,
@@ -639,3 +640,80 @@ class SemanticMemory(Base):
     last_accessed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+# ------------------------------------------------------------------ billing
+
+
+class PlanTier(str, enum.Enum):
+    FREE = "free"
+    PRO = "pro"
+
+
+class PaymeState(int, enum.Enum):
+    """Payme's own transaction states. The integers are theirs, not ours.
+
+    Payme sends and expects exactly these values, so they are stored as
+    written rather than mapped to friendlier names — a translation layer here
+    would be one more place for a payment to end up in the wrong state.
+    """
+
+    CREATED = 1
+    PERFORMED = 2
+    CANCELLED = -1
+    CANCELLED_AFTER_PERFORM = -2
+
+
+class Subscription(Base):
+    """What a user has paid for, and until when.
+
+    Separate from the user row because a subscription has a history: renewals,
+    cancellations and refunds all need to be answerable after the fact, and an
+    `is_pro` column on `users` would answer none of them.
+    """
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    tier: Mapped[PlanTier] = mapped_column(_pg_enum(PlanTier, "plan_tier"), default=PlanTier.PRO)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PaymeTransaction(Base):
+    """One Payme transaction, mirrored on our side.
+
+    Payme is the source of truth for money; this table is the source of truth
+    for *what we did about it*. Both are needed: their retries are frequent and
+    a method may arrive twice, so every handler keys off `payme_id` and returns
+    the same answer the second time.
+    """
+
+    __tablename__ = "payme_transactions"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    #: Payme's transaction id. Unique because their retries must not create a
+    #: second row — that is how a customer gets charged twice.
+    payme_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    #: Tiyin, not soʻm. Payme denominates in the smallest unit and an integer
+    #: keeps the arithmetic exact; 79 000 soʻm arrives as 7 900 000.
+    amount: Mapped[int] = mapped_column(Integer)
+    #: Stored as a plain integer, not a database enum: these values are
+    #: Payme's wire protocol. Pinning them into a PG enum type would mean a
+    #: migration if Payme ever adds a state, and would buy nothing — the
+    #: allowed set is already enforced by PaymeState in code.
+    state: Mapped[int] = mapped_column(Integer, default=PaymeState.CREATED.value, index=True)
+    #: Milliseconds since epoch, which is what Payme sends and expects back.
+    payme_time: Mapped[int] = mapped_column(BigInteger)
+    create_time: Mapped[int] = mapped_column(BigInteger, default=0)
+    perform_time: Mapped[int] = mapped_column(BigInteger, default=0)
+    cancel_time: Mapped[int] = mapped_column(BigInteger, default=0)
+    reason: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

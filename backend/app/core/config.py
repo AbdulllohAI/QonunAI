@@ -216,6 +216,29 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 25
 
     # ------------------------------------------------------------ limits
+    # ------------------------------------------------------------- billing
+    PAYME_ENABLED: bool = False
+    """Whether the Payme endpoint accepts calls at all.
+
+    Off by default and deliberately separate from having a key. A merchant
+    account is created by the business owner in Payme's cabinet; until that
+    exists there is nothing to authenticate against, and an endpoint that
+    half-works is worse than one that plainly refuses."""
+
+    PAYME_MERCHANT_ID: str = ""
+    PAYME_KEY: str = ""
+    """The merchant key Payme signs its calls with. A secret — it belongs in
+    `flyctl secrets`, never in fly.toml."""
+
+    PAYME_ACCOUNT_FIELD: str = "user_id"
+    """The field name configured in the Payme cabinet for the payer's account.
+    Must match there exactly or every payment resolves to no user."""
+
+    PRO_PRICE_UZS: int = 79_000
+    """Price in soʻm. Payme is told tiyin (this x 100), and the amount on an
+    incoming transaction is checked against it — a mismatch is refused rather
+    than accepted at whatever was sent."""
+
     RATE_LIMIT_WINDOW_SECONDS: int = 86_400
     """Length of the rate-limit window. 86400 = one day.
 
@@ -228,6 +251,14 @@ class Settings(BaseSettings):
     """Requests per window for anonymous callers, keyed by client IP."""
 
     RATE_LIMIT_USER: int = 500
+
+    RATE_LIMIT_PRO: int = 5_000
+    """Requests per window on a paid subscription.
+
+    Advertised as "unlimited", which in practice means a ceiling high enough
+    that no legitimate user reaches it while a runaway script still stops. A
+    genuinely uncapped tier is an unbounded LLM bill wearing a friendly
+    name."""
     """Requests per window for signed-in users. Ten times the anonymous quota,
     keeping the ratio the previous hourly limits used."""
 
