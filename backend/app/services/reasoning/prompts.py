@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from app.services.reasoning.verbosity import Verbosity, style_instruction
+
 from app.db.models import Language
 
 # Matches only when the ENTIRE trimmed message is a bare greeting/pleasantry —
@@ -294,9 +296,20 @@ _COMPACT_ADDENDUM = (
 
 
 def build_system_prompt(
-    mode: str, answer_language: Language, *, compact: bool = False
+    mode: str,
+    answer_language: Language,
+    *,
+    compact: bool = False,
+    verbosity: Verbosity = Verbosity.NORMAL,
 ) -> str:
-    """Frozen per (mode, language, compact) — do not interpolate dates or IDs in here."""
+    """Frozen per (mode, language, compact, verbosity) — do not interpolate dates
+    or IDs in here.
+
+    Verbosity is part of the cache key rather than a runtime instruction in the
+    user turn because it changes how the whole answer is shaped, and there are
+    only three of them — three cached prefixes per language is a cheap price for
+    the length actually being obeyed.
+    """
     base = _MODE_PROMPTS.get(mode, _MODE_PROMPTS["qa"])
     lang_section = (
         f"\n\n## Answer language\n\n"
@@ -306,7 +319,8 @@ def build_system_prompt(
         f"text is in another language, translate accurately rather than paraphrasing "
         f"loosely — a mistranslated statutory term is a wrong answer."
     )
-    return base + lang_section + (_COMPACT_ADDENDUM if compact else "")
+    style = "\n\n" + style_instruction(verbosity)
+    return base + lang_section + style + (_COMPACT_ADDENDUM if compact else "")
 
 
 NO_CONTEXT_MESSAGES: dict[Language, str] = {

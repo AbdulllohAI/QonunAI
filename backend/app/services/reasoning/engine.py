@@ -28,6 +28,12 @@ from app.services.reasoning import risk as risk_mod
 from app.services.reasoning import validator as validator_mod
 from app.services.memory.manager import MemoryContext, memory_manager
 from app.services.reasoning.intent import Intent, classify_intent, conversational_reply
+from app.services.reasoning.verbosity import (
+    Verbosity,
+    is_bare_directive,
+    remembered_from_history,
+    resolve,
+)
 from app.services.reasoning.prompts import (
     DISCLAIMER_BY_LANG,
     GREETING_RESPONSES,
@@ -86,6 +92,29 @@ class LegalAnswer:
             "refusal_reason": self.refusal_reason,
             "follow_ups": self.follow_ups,
         }
+
+
+def _resolve_turn(
+    question: str, history: Sequence[ChatMessage] | None
+) -> tuple[str, Verbosity]:
+    """The question to actually answer, and how long the answer should be.
+
+    A bare length directive -- "batafsil", "qisqaroq" -- is not a question. Sent
+    to retrieval as written it matches nothing, and the user gets "no sources
+    found" in reply to what was really a formatting request. So the previous
+    question is carried forward and re-answered at the new length.
+
+    The preference itself is read back from the conversation rather than stored,
+    which keeps it durable with no column to migrate: the last directive the
+    user typed is the state.
+    """
+    user_messages = [m.content for m in (history or []) if m.role == "user"]
+    verbosity = resolve(question, remembered_from_history(user_messages))
+
+    if is_bare_directive(question) and user_messages:
+        return user_messages[-1], verbosity
+    return question, verbosity
+
 
 
 class ReasoningEngine:
@@ -178,6 +207,7 @@ class ReasoningEngine:
         user_id: uuid.UUID | None = None,
     ) -> LegalAnswer:
         started = time.perf_counter()
+        question, verbosity = _resolve_turn(question, history)
         lang = language or detect_language(question)
         intent = Intent.LEGAL if document_text else classify_intent(question)
         if intent is not Intent.LEGAL:
@@ -201,7 +231,7 @@ class ReasoningEngine:
         if user_id and mode == "qa":
             mem_ctx = await memory_manager.get_context(session, user_id, question)
 
-        system = build_system_prompt(mode, lang, compact=compact)
+        system = build_system_prompt(mode, lang, compact=compact, verbosity=verbosity)
         user_turn = context_message(
             context.text,
             _user_payload(question, document_text),
@@ -272,6 +302,7 @@ class ReasoningEngine:
         user_id: uuid.UUID | None = None,
     ) -> AsyncIterator[dict]:
         started = time.perf_counter()
+        question, verbosity = _resolve_turn(question, history)
         lang = language or detect_language(question)
         intent = Intent.LEGAL if document_text else classify_intent(question)
         if intent is not Intent.LEGAL:
@@ -308,7 +339,7 @@ class ReasoningEngine:
         if user_id and mode == "qa":
             mem_ctx = await memory_manager.get_context(session, user_id, question)
 
-        system = build_system_prompt(mode, lang, compact=compact)
+        system = build_system_prompt(mode, lang, compact=compact, verbosity=verbosity)
         user_turn = context_message(
             context.text,
             _user_payload(question, document_text),
