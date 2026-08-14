@@ -319,7 +319,7 @@ class ReasoningEngine:
                 refusal_reason="model_refusal",
             )
 
-        result = self._finalise(
+        result = await self._finalise(
             question=question,
             raw_answer=llm_response.text,
             context=context,
@@ -426,7 +426,7 @@ class ReasoningEngine:
                 final_response = event.response
 
         raw = (final_response.text if final_response else "") or "".join(collected)
-        result = self._finalise(
+        result = await self._finalise(
             question=question,
             raw_answer=raw,
             context=context,
@@ -449,7 +449,7 @@ class ReasoningEngine:
         yield {"type": "done", "result": result.to_dict()}
 
     # ---------------------------------------------------------------- finalise
-    def _finalise(
+    async def _finalise(
         self,
         *,
         question: str,
