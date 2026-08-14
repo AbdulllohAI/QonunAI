@@ -262,6 +262,13 @@ class ReasoningEngine:
         intent = Intent.LEGAL if document_text else classify_intent(question)
         if intent is not Intent.LEGAL:
             return self._conversational_answer(intent, lang, mode, started)
+        # Decided before the legal prompt is ever built. Hooking this to a
+        # failed validation does not work: asked "how do I cook osh?", the
+        # model follows the core prompt's "if the question isn't legal"
+        # branch and deflects, and a deflection is a well-formed answer that
+        # passes validation cleanly — there is no rejection to hook.
+        if not document_text and not looks_legal(question, lang.value):
+            return await self._general_answer(question, lang, mode, 0, started, provider)
 
         retrieval_query = _retrieval_query(question, document_text)
         lang, retrieval, context = await self._prepare(
@@ -361,8 +368,13 @@ class ReasoningEngine:
         question, verbosity = _resolve_turn(question, history)
         lang = language or detect_language(question)
         intent = Intent.LEGAL if document_text else classify_intent(question)
-        if intent is not Intent.LEGAL:
-            result = self._conversational_answer(intent, lang, mode, started)
+        if intent is not Intent.LEGAL or (
+            not document_text and not looks_legal(question, lang.value)
+        ):
+            if intent is Intent.LEGAL:
+                result = await self._general_answer(question, lang, mode, 0, started, provider)
+            else:
+                result = self._conversational_answer(intent, lang, mode, started)
             yield {"type": "sources", "sources": [], "retrieval_ms": 0, "language": lang.value}
             yield {"type": "delta", "text": result.answer}
             yield {"type": "done", "result": result.to_dict()}
@@ -488,16 +500,6 @@ class ReasoningEngine:
                 "answer rejected by validator",
                 extra={"reason": validation.reason, "mode": mode},
             )
-            # An uncited answer to a question that was never legal is not a
-            # failure to cite — it is the wrong pipeline. Retrieval's top-3
-            # fallback means `context.is_empty` almost never fires, so this,
-            # not the empty-context branch, is where "how do I cook osh?"
-            # actually lands, and the canned "no legal provisions were found"
-            # is what the user saw.
-            if not looks_legal(question, lang.value):
-                return await self._general_answer(
-                    question, lang, mode, retrieval_ms, started, provider
-                )
             return LegalAnswer(
                 answer=NO_CONTEXT_MESSAGES[lang],
                 disclaimer=DISCLAIMER_BY_LANG[lang],
