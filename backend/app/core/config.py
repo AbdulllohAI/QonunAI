@@ -216,8 +216,20 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 25
 
     # ------------------------------------------------------------ limits
-    RATE_LIMIT_ANON_PER_HOUR: int = 20
-    RATE_LIMIT_USER_PER_HOUR: int = 200
+    RATE_LIMIT_WINDOW_SECONDS: int = 86_400
+    """Length of the rate-limit window. 86400 = one day.
+
+    Separated from the counts so the quota can be expressed in whatever unit
+    the product actually promises. A daily quota is a clearer promise than an
+    hourly one -- "50 questions a day" is something a user can plan around,
+    where an hourly cap mostly shows up as an unexplained wall mid-session."""
+
+    RATE_LIMIT_ANON: int = 50
+    """Requests per window for anonymous callers, keyed by client IP."""
+
+    RATE_LIMIT_USER: int = 500
+    """Requests per window for signed-in users. Ten times the anonymous quota,
+    keeping the ratio the previous hourly limits used."""
 
     DISCLAIMER: str = (
         "This system provides informational legal assistance and is not a licensed lawyer."

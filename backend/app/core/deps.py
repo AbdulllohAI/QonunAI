@@ -93,14 +93,19 @@ def require_role(*roles: UserRole):
 require_admin = require_role(UserRole.ADMIN)
 
 
+def _window_label(seconds: int) -> str:
+    """Human unit for the error message, so it matches what was promised."""
+    return {3600: "hour", 86_400: "day", 60: "minute"}.get(seconds, f"{seconds}s")
+
+
 class RateLimiter:
     """Fixed-window limiter in Redis. Fails open — a Redis outage must not take
     the API down, and the downside of a brief unlimited window is acceptable
     here."""
 
-    def __init__(self, anon_per_hour: int | None = None, user_per_hour: int | None = None) -> None:
-        self.anon = anon_per_hour or settings.RATE_LIMIT_ANON_PER_HOUR
-        self.user = user_per_hour or settings.RATE_LIMIT_USER_PER_HOUR
+    def __init__(self, anon: int | None = None, user: int | None = None) -> None:
+        self.anon = anon or settings.RATE_LIMIT_ANON
+        self.user = user or settings.RATE_LIMIT_USER
 
     async def __call__(
         self, request: Request, user: User | None = Depends(get_optional_user)
@@ -110,23 +115,29 @@ class RateLimiter:
 
         identity = str(user.id) if user else _client_ip(request)
         limit = self.user if user else self.anon
-        window = int(time.time() // 3600)
+        seconds = settings.RATE_LIMIT_WINDOW_SECONDS
+        window = int(time.time() // seconds)
         key = f"rl:{window}:{identity}"
 
         try:
             redis = get_redis()
             count = await redis.incr(key)
             if count == 1:
-                await redis.expire(key, 3600)
+                await redis.expire(key, seconds)
         except Exception as exc:
             log.warning("rate limiter unavailable", extra={"error": str(exc)})
             return
 
         if count > limit:
+            # Tell the caller when the window actually resets rather than a
+            # flat window length: with a daily quota, "retry in 86400s" is
+            # wrong for everyone who did not hit the limit at midnight.
+            resets_at = (window + 1) * seconds
+            retry_after = max(1, int(resets_at - time.time()))
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"rate limit exceeded ({limit}/hour)",
-                headers={"Retry-After": "3600"},
+                detail=f"rate limit exceeded ({limit}/{_window_label(seconds)})",
+                headers={"Retry-After": str(retry_after)},
             )
 
 
