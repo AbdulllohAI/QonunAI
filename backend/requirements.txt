@@ -19,6 +19,10 @@ celery==5.4.0
 
 # ---- auth ------------------------------------------------------------------
 pyjwt==2.10.1
+# Google sign-in verifies an RS256 ID token against Google's JWKS. pyjwt can
+# parse it without this, but cannot verify the signature -- and an unverified
+# ID token is just a JSON blob the browser handed us.
+cryptography==44.0.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.2.1
 

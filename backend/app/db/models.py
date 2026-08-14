@@ -445,6 +445,12 @@ class User(Base):
     telegram_id: Mapped[int | None] = mapped_column(
         BigInteger, unique=True, index=True, nullable=True
     )
+    #: Google's `sub`. Accounts key on this rather than email because email can
+    #: change hands — a corporate address is reassigned when someone leaves —
+    #: while `sub` is stable for the life of the Google account.
+    google_sub: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True
+    )
     full_name: Mapped[str | None] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(_pg_enum(UserRole, "user_role"), default=UserRole.USER)
     preferred_language: Mapped[Language] = mapped_column(

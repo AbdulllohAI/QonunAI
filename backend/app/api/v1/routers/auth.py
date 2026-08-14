@@ -10,7 +10,7 @@ from app.core.deps import get_current_user
 from app.core.security import create_token, decode_token, hash_password, verify_password
 from app.db.models import User
 from app.db.session import get_session
-from app.services.auth import telegram
+from app.services.auth import google, telegram
 from app.schemas.common import (
     LoginRequest,
     RefreshRequest,
@@ -128,6 +128,68 @@ async def telegram_login(
         # could be used to hijack.
         user.full_name = profile.full_name
         await session.commit()
+
+    if not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled")
+
+    return _tokens(user)
+
+
+@router.post("/google", response_model=TokenPair)
+async def google_login(
+    payload: dict, session: AsyncSession = Depends(get_session)
+) -> TokenPair:
+    """Sign in with a Google ID token.
+
+    Account resolution, in order, and the order is the security:
+
+    1. A matching `google_sub` signs in. This is the stable identifier.
+    2. Otherwise, an existing account with the same email is *linked* — but
+       only when Google says the address is verified. Linking on an unverified
+       address is account takeover: anyone can put someone else's email on a
+       Google account, and without the check that would hand them the matching
+       account here.
+    3. Otherwise a new account is created.
+    """
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Google sign-in is not configured"
+        )
+
+    try:
+        profile = google.verify(str(payload.get("credential") or ""))
+    except google.GoogleAuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from None
+
+    user = (
+        await session.execute(select(User).where(User.google_sub == profile.google_sub))
+    ).scalar_one_or_none()
+
+    if user is None and profile.email and profile.email_verified:
+        existing = (
+            await session.execute(select(User).where(User.email == profile.email))
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.google_sub = profile.google_sub
+            user = existing
+
+    if user is None:
+        user = User(
+            google_sub=profile.google_sub,
+            # Only store the address if Google vouched for it; an unverified
+            # one is a claim, not a fact, and it would collide with the
+            # unique index against a real owner.
+            email=profile.email if profile.email_verified else None,
+            full_name=profile.full_name,
+            hashed_password=None,
+        )
+        session.add(user)
+
+    if profile.full_name and user.full_name != profile.full_name:
+        user.full_name = profile.full_name
+
+    await session.commit()
+    await session.refresh(user)
 
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled")

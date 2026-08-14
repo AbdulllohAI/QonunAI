@@ -216,6 +216,15 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 25
 
     # ------------------------------------------------------------ limits
+    # -------------------------------------------------------------- google
+    GOOGLE_CLIENT_ID: str = ""
+    """OAuth client id from the Google Cloud console.
+
+    Not a secret — it ships in the browser — but it is load-bearing for
+    security: every ID token is checked to have been issued *for this id*.
+    Leave it empty and Google sign-in refuses rather than accepting tokens
+    minted for somebody else's application."""
+
     # ------------------------------------------------------------ telegram
     TELEGRAM_BOT_TOKEN: str = ""
     """Token from @BotFather. A secret: it is the HMAC key material for every
