@@ -167,3 +167,28 @@ def test_every_level_has_an_instruction():
 def test_brevity_never_licenses_dropping_citations():
     """The one thing a short answer must not shorten."""
     assert "citation" in style_instruction(Verbosity.BRIEF).lower()
+
+
+def test_consecutive_directives_still_find_the_question():
+    """After "batafsil", a following "juda qisqa" must not resolve to
+    "batafsil" — that is another directive with no question in it, and
+    retrieval would return nothing, so asking to shorten an answer produced
+    "no relevant provisions found" instead of a shorter answer."""
+    question, verbosity = _resolve_turn(
+        "juda qisqa", _history("Mehnat shartnomasi nima?", "batafsil")
+    )
+    assert question == "Mehnat shartnomasi nima?"
+    assert verbosity is Verbosity.BRIEF
+
+
+def test_a_long_run_of_directives_still_resolves():
+    question, _ = _resolve_turn(
+        "qisqaroq", _history("Ta'til necha kun?", "batafsil", "kengroq", "davom et")
+    )
+    assert question == "Ta'til necha kun?"
+
+
+def test_history_of_only_directives_falls_back_to_the_message():
+    """Nothing to carry forward; answering it is better than inventing."""
+    question, _ = _resolve_turn("qisqaroq", _history("batafsil"))
+    assert question == "qisqaroq"

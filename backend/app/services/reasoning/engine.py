@@ -111,8 +111,15 @@ def _resolve_turn(
     user_messages = [m.content for m in (history or []) if m.role == "user"]
     verbosity = resolve(question, remembered_from_history(user_messages))
 
-    if is_bare_directive(question) and user_messages:
-        return user_messages[-1], verbosity
+    if is_bare_directive(question):
+        # Walk back past earlier directives, not just one turn. After
+        # "batafsil", a following "juda qisqa" would otherwise resolve to
+        # "batafsil" -- another directive, no question in it -- and retrieval
+        # would return nothing, so asking to shorten an answer produced "no
+        # relevant provisions found" instead of a shorter answer.
+        for earlier in reversed(user_messages):
+            if not is_bare_directive(earlier):
+                return earlier, verbosity
     return question, verbosity
 
 
