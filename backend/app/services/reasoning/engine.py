@@ -488,6 +488,16 @@ class ReasoningEngine:
                 "answer rejected by validator",
                 extra={"reason": validation.reason, "mode": mode},
             )
+            # An uncited answer to a question that was never legal is not a
+            # failure to cite — it is the wrong pipeline. Retrieval's top-3
+            # fallback means `context.is_empty` almost never fires, so this,
+            # not the empty-context branch, is where "how do I cook osh?"
+            # actually lands, and the canned "no legal provisions were found"
+            # is what the user saw.
+            if not looks_legal(question, lang.value):
+                return await self._general_answer(
+                    question, lang, mode, retrieval_ms, started, provider
+                )
             return LegalAnswer(
                 answer=NO_CONTEXT_MESSAGES[lang],
                 disclaimer=DISCLAIMER_BY_LANG[lang],
