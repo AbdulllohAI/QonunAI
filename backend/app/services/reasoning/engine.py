@@ -28,6 +28,7 @@ from app.services.reasoning import risk as risk_mod
 from app.services.reasoning import validator as validator_mod
 from app.services.memory.manager import MemoryContext, memory_manager
 from app.services.reasoning.intent import Intent, classify_intent, conversational_reply
+from app.services.reasoning.scope import looks_legal
 from app.services.reasoning.verbosity import (
     Verbosity,
     is_bare_directive,
@@ -35,6 +36,7 @@ from app.services.reasoning.verbosity import (
     resolve,
 )
 from app.services.reasoning.prompts import (
+    GENERAL_SYSTEM,
     DISCLAIMER_BY_LANG,
     GREETING_RESPONSES,
     NO_CONTEXT_MESSAGES,
@@ -149,6 +151,47 @@ class ReasoningEngine:
         context = context_builder.build(retrieval.chunks, answer_language=lang)
         return lang, retrieval, context
 
+    async def _general_answer(
+        self, question: str, lang: Language, mode: str, retrieval_ms: int,
+        started: float, provider: str | None,
+    ) -> LegalAnswer:
+        """A brief, ordinary reply to a question that is not about law.
+
+        Retrieval finding nothing means one of two things, and they need
+        opposite answers. For a legal question this corpus does not cover, "no
+        relevant provisions were found" is the honest reply. For "how do I cook
+        osh?" it is technically true and reads as a broken product.
+
+        No sources are supplied and none are expected: the model is told not to
+        cite, the answer carries no citations, and `answered` stays False so
+        nothing downstream mistakes this for a sourced legal answer.
+        """
+        try:
+            response = await llm_router.complete(
+                system=GENERAL_SYSTEM,
+                messages=[ChatMessage(role="user", content=question)],
+                provider=provider,
+            )
+            text = response.text.strip()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("general_reply_failed", extra={"error": str(exc)[:200]})
+            text = NO_CONTEXT_MESSAGES[lang]
+
+        return LegalAnswer(
+            answer=text,
+            disclaimer=DISCLAIMER_BY_LANG[lang],
+            language=lang.value,
+            mode=mode,
+            risk=risk_mod.RiskAssessment(
+                level=risk_mod.RiskLevel.LOW,
+                factors=["Not a legal question — answered conversationally, without sources."],
+            ).to_dict(),
+            retrieval_ms=retrieval_ms,
+            total_ms=int((time.perf_counter() - started) * 1000),
+            answered=False,
+            refusal_reason="not_legal",
+        )
+
     def _no_context_answer(
         self, lang: Language, mode: str, retrieval_ms: int, started: float
     ) -> LegalAnswer:
@@ -232,6 +275,10 @@ class ReasoningEngine:
         )
 
         if context.is_empty:
+            if not looks_legal(question, lang.value):
+                return await self._general_answer(
+                    question, lang, mode, retrieval.took_ms, started, provider
+                )
             return self._no_context_answer(lang, mode, retrieval.took_ms, started)
 
         mem_ctx = MemoryContext()
@@ -339,7 +386,12 @@ class ReasoningEngine:
         }
 
         if context.is_empty:
-            result = self._no_context_answer(lang, mode, retrieval.took_ms, started)
+            if looks_legal(question, lang.value):
+                result = self._no_context_answer(lang, mode, retrieval.took_ms, started)
+            else:
+                result = await self._general_answer(
+                    question, lang, mode, retrieval.took_ms, started, provider
+                )
             yield {"type": "delta", "text": result.answer}
             yield {"type": "done", "result": result.to_dict()}
             return
