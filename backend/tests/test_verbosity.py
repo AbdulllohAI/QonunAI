@@ -192,3 +192,42 @@ def test_history_of_only_directives_falls_back_to_the_message():
     """Nothing to carry forward; answering it is better than inventing."""
     question, _ = _resolve_turn("qisqaroq", _history("batafsil"))
     assert question == "qisqaroq"
+
+
+# ------------------------------------------------------------------ script
+
+def test_latin_questions_get_a_latin_script_instruction():
+    """The corpus is 6% Uzbek Latin; the rest is Cyrillic and Russian, so a
+    Latin question is nearly always answered from Cyrillic sources and the
+    model drifts into Cyrillic without ever "changing language". A user who
+    typed Latin and gets Cyrillic has to decipher their own answer."""
+    from app.db.models import Language as L
+    from app.services.reasoning.prompts import build_system_prompt, context_message
+
+    assert "LATIN alphabet" in build_system_prompt("qa", L.UZ_LATN)
+    assert "SCRIPT:" in context_message("src", "savol", answer_language=L.UZ_LATN)
+
+
+def test_cyrillic_questions_get_a_cyrillic_instruction():
+    from app.db.models import Language as L
+    from app.services.reasoning.prompts import build_system_prompt, context_message
+
+    assert "CYRILLIC alphabet" in build_system_prompt("qa", L.UZ_CYRL)
+    assert "SCRIPT:" in context_message("src", "savol", answer_language=L.UZ_CYRL)
+
+
+def test_russian_and_english_carry_no_script_note():
+    """Only Uzbek has the two-script problem; the note would be noise elsewhere."""
+    from app.db.models import Language as L
+    from app.services.reasoning.prompts import context_message
+
+    for language in (L.RU, L.EN):
+        assert "SCRIPT:" not in context_message("src", "savol", answer_language=language)
+
+
+def test_language_detection_drives_the_script():
+    from app.db.models import Language as L
+    from app.services.lang.detect import detect_language
+
+    assert detect_language("Mehnat shartnomasi qanday bekor qilinadi?") is L.UZ_LATN
+    assert detect_language("Меҳнат шартномаси қандай бекор қилинади?") is L.UZ_CYRL

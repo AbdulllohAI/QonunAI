@@ -245,6 +245,7 @@ class ReasoningEngine:
             mode=mode,
             memory_block=mem_ctx.to_prompt_block(),
             verbosity=verbosity,
+            answer_language=lang,
         )
         messages = list(history or []) + [ChatMessage(role="user", content=user_turn)]
 
@@ -354,6 +355,7 @@ class ReasoningEngine:
             mode=mode,
             memory_block=mem_ctx.to_prompt_block(),
             verbosity=verbosity,
+            answer_language=lang,
         )
         messages = list(history or []) + [ChatMessage(role="user", content=user_turn)]
 

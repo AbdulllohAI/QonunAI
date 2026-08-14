@@ -295,6 +295,24 @@ _COMPACT_ADDENDUM = (
 )
 
 
+#: Script is the failure people actually notice. Uzbek Latin and Cyrillic are
+#: the same language, so a model reading Cyrillic sources drifts into Cyrillic
+#: without ever "changing language" — the instruction has to name the letters.
+_SCRIPT_NOTE = {
+    Language.UZ_LATN: (
+        "\n\nWrite in the LATIN alphabet: \"Mehnat shartnomasi bekor qilinadi\", "
+        "never \"Меҳнат шартномаси бекор қилинади\". Not a single Cyrillic "
+        "character in the prose, headings included. Article labels quoted from a "
+        "Cyrillic source get transliterated too: \"160-modda\", not \"160-модда\"."
+    ),
+    Language.UZ_CYRL: (
+        "\n\nWrite in the CYRILLIC alphabet: \"Меҳнат шартномаси бекор қилинади\", "
+        "never \"Mehnat shartnomasi bekor qilinadi\". Not a single Latin-script "
+        "Uzbek word in the prose, headings included."
+    ),
+}
+
+
 def build_system_prompt(
     mode: str,
     answer_language: Language,
@@ -318,6 +336,14 @@ def build_system_prompt(
         f"(article numbers and act names) so they remain verifiable. If the source "
         f"text is in another language, translate accurately rather than paraphrasing "
         f"loosely — a mistranslated statutory term is a wrong answer."
+        f"\n\n**The SOURCES will usually be in a different language or script from "
+        f"the question, and that must not change your answer's script.** Only 6% of "
+        f"this corpus is Uzbek Latin; the rest is Uzbek Cyrillic and Russian, so a "
+        f"question typed in Latin will almost always be answered from Cyrillic or "
+        f"Russian text. Transliterate and translate it. A user who typed Latin and "
+        f"receives Cyrillic has to decipher their own answer, which reads as the "
+        f"product being broken — match the script the user typed, every time."
+        + _SCRIPT_NOTE.get(answer_language, "")
     )
     style = "\n\n" + style_instruction(verbosity)
     return base + lang_section + style + (_COMPACT_ADDENDUM if compact else "")
@@ -365,18 +391,36 @@ _LENGTH_REMINDER = {
 }
 
 
+_SCRIPT_REMINDER = {
+    Language.UZ_LATN: (
+        "SCRIPT: answer in Uzbek LATIN letters only, even though the sources "
+        "above are Cyrillic or Russian. Transliterate them."
+    ),
+    Language.UZ_CYRL: (
+        "SCRIPT: answer in Uzbek CYRILLIC letters only, even if the sources "
+        "above are in Latin or Russian."
+    ),
+}
+
+
 def context_message(
     context: str,
     question: str,
     mode: str = "qa",
     memory_block: str = "",
     verbosity: Verbosity = Verbosity.NORMAL,
+    answer_language: Language | None = None,
 ) -> str:
     """The user-turn payload. Everything volatile lives here, after the cache
     breakpoint on the system prompt."""
     label = "DOCUMENT AND QUESTION" if mode == "document_analysis" else "QUESTION"
     mem_section = f"{memory_block}\n" if memory_block else ""
     tail = "Answer using only the SOURCES above. Cite [S<n>] tags inline."
+    if answer_language in _SCRIPT_REMINDER:
+        # Same lesson as the length instruction: the SOURCES block sitting
+        # directly above is overwhelmingly in another script, and a cached
+        # instruction loses to it. Recency is what carries.
+        tail = f"{_SCRIPT_REMINDER[answer_language]}\n{tail}"
     reminder = _LENGTH_REMINDER[verbosity]
     if reminder:
         tail = f"{reminder}\n{tail}"
