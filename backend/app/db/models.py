@@ -432,8 +432,19 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
-    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255))
+    #: Nullable since Telegram sign-in: Telegram never discloses an email, and
+    #: synthesising one (tg_12345@telegram.local) would put fake addresses in
+    #: the table that something downstream would eventually try to send to.
+    #: Postgres allows many NULLs under a unique index, so uniqueness still
+    #: holds for everyone who does have one.
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
+    #: Nullable for the same reason — an account that can only ever sign in
+    #: through Telegram has no password, and a placeholder hash would be a
+    #: credential nobody knows but everybody stores.
+    hashed_password: Mapped[str | None] = mapped_column(String(255))
+    telegram_id: Mapped[int | None] = mapped_column(
+        BigInteger, unique=True, index=True, nullable=True
+    )
     full_name: Mapped[str | None] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(_pg_enum(UserRole, "user_role"), default=UserRole.USER)
     preferred_language: Mapped[Language] = mapped_column(

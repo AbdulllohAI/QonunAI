@@ -216,6 +216,15 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 25
 
     # ------------------------------------------------------------ limits
+    # ------------------------------------------------------------ telegram
+    TELEGRAM_BOT_TOKEN: str = ""
+    """Token from @BotFather. A secret: it is the HMAC key material for every
+    login, so anyone holding it can forge any account. Belongs in
+    `flyctl secrets`, never in fly.toml."""
+
+    TELEGRAM_BOT_USERNAME: str = ""
+    """The bot's public @name, used by the browser widget. Not a secret."""
+
     # ------------------------------------------------------------- billing
     PAYME_ENABLED: bool = False
     """Whether the Payme endpoint accepts calls at all.
