@@ -343,13 +343,43 @@ NO_CONTEXT_MESSAGES: dict[Language, str] = {
 }
 
 
+#: Restated in the user turn, not only in the cached system prompt. Two things
+#: work against a cached length instruction: the answer-structure section above
+#: mandates headings, and the conversation history is full of the model's own
+#: earlier long answers, which it imitates. Measured — a "juda qisqa" turn came
+#: back at 2541 characters, longer than the answer it was asked to shorten.
+#: Recency is what actually carries.
+_LENGTH_REMINDER = {
+    Verbosity.BRIEF: (
+        "LENGTH: one or two sentences total. No section headings, no bullets. "
+        "Ignore the answer-structure section for this turn — the user asked for "
+        "less, and the earlier answers in this conversation are not the model "
+        "to follow. Keep the [S<n>] tags."
+    ),
+    Verbosity.NORMAL: "",
+    Verbosity.DETAILED: (
+        "LENGTH: go deeper than the previous answer — procedure, exceptions, "
+        "deadlines, worked examples. More legal substance, not more words about "
+        "the same point."
+    ),
+}
+
+
 def context_message(
-    context: str, question: str, mode: str = "qa", memory_block: str = ""
+    context: str,
+    question: str,
+    mode: str = "qa",
+    memory_block: str = "",
+    verbosity: Verbosity = Verbosity.NORMAL,
 ) -> str:
     """The user-turn payload. Everything volatile lives here, after the cache
     breakpoint on the system prompt."""
     label = "DOCUMENT AND QUESTION" if mode == "document_analysis" else "QUESTION"
     mem_section = f"{memory_block}\n" if memory_block else ""
+    tail = "Answer using only the SOURCES above. Cite [S<n>] tags inline."
+    reminder = _LENGTH_REMINDER[verbosity]
+    if reminder:
+        tail = f"{reminder}\n{tail}"
     return (
         "SOURCES\n"
         "=======\n"
@@ -358,5 +388,5 @@ def context_message(
         f"{label}\n"
         f"{'=' * len(label)}\n"
         f"{question}\n\n"
-        "Answer using only the SOURCES above. Cite [S<n>] tags inline."
+        f"{tail}"
     )

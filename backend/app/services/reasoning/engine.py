@@ -244,6 +244,7 @@ class ReasoningEngine:
             _user_payload(question, document_text),
             mode=mode,
             memory_block=mem_ctx.to_prompt_block(),
+            verbosity=verbosity,
         )
         messages = list(history or []) + [ChatMessage(role="user", content=user_turn)]
 
@@ -352,6 +353,7 @@ class ReasoningEngine:
             _user_payload(question, document_text),
             mode=mode,
             memory_block=mem_ctx.to_prompt_block(),
+            verbosity=verbosity,
         )
         messages = list(history or []) + [ChatMessage(role="user", content=user_turn)]
 
