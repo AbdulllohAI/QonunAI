@@ -12,9 +12,11 @@ treated as equivalent.
 """
 from __future__ import annotations
 
+import pytest
+
 from app.db.models import Language
 from app.services.rag.keyword import build_tsquery
-from app.services.rag.synonyms import expand_tokens
+from app.services.rag.synonyms import SYNONYM_GROUPS, expand_tokens
 
 
 def _terms(query: str, language: Language) -> set[str]:
@@ -167,3 +169,107 @@ def test_expansion_only_ever_adds_candidates():
     extra = expand_tokens(tokens)
     assert "qonun" in tokens
     assert all(t not in extra for t in tokens)
+
+
+# ------------------------------------------------------------------ English
+
+# English is the language that most needs the glossary and had none of it: the
+# corpus contains no English text at all, so the lexical branches had nothing
+# to match and dense retrieval carried English questions alone. Measured
+# before these entries existed, "What form must a labour contract take?"
+# returned Civil Code 366 at 0.21 and never reached Labour Code 106, while the
+# Uzbek phrasing of the same question hit the Labour Code at 0.40.
+
+
+@pytest.mark.parametrize(
+    "english,expected",
+    [
+        ("contract", "shartnoma"),
+        ("employee", "xodim"),
+        ("employer", "работодатель"),
+        ("dismissal", "увольнение"),
+        ("theft", "кража"),
+        ("divorce", "развод"),
+        ("court", "суд"),
+        ("annual leave", "отпуск"),
+        ("unlawful", "noqonuniy"),
+    ],
+)
+def test_english_reaches_the_corpus_languages(english, expected):
+    assert expected in expand_tokens([english])
+
+
+def test_english_terms_are_never_transliterated():
+    """`latin_to_cyrillic` exists so Uzbek Latin also matches Uzbek Cyrillic
+    text. Run over English it produces keys like "cонтраcт" that match nothing
+    in any language while still being emitted into every tsquery."""
+    import re
+
+    from app.services.rag.synonyms import _TABLE
+
+    mixed = [k for k in _TABLE if re.search(r"[a-z]", k) and re.search(r"[а-яёқғҳў]", k)]
+    assert mixed == []
+
+
+def test_every_declared_english_term_is_actually_used():
+    """Keeps the skip-list honest: a term dropped from a group but left in
+    `_ENGLISH_TERMS` would be dead weight nobody notices."""
+    from app.services.rag.synonyms import _ENGLISH_TERMS
+
+    in_groups: set[str] = set()
+    for group in SYNONYM_GROUPS:
+        in_groups |= set(group)
+    assert _ENGLISH_TERMS - in_groups == set()
+
+
+def test_english_does_not_collapse_contract_and_transaction():
+    """The distinction the Uzbek and Russian groups exist to preserve, which
+    English blurs: договор/shartnoma is a contract, сделка/bitim a transaction.
+    """
+    contract = expand_tokens(["contract"])
+    transaction = expand_tokens(["transaction"])
+
+    assert "shartnoma" in contract and "договор" in contract
+    assert "bitim" in transaction and "сделка" in transaction
+    assert "bitim" not in contract and "сделка" not in contract
+    assert "shartnoma" not in transaction and "договор" not in transaction
+
+
+def test_a_term_in_two_groups_reaches_both():
+    """"dismissal" sits with the Uzbek phrasings and the Russian ones. The
+    index unions rather than assigns, or whichever group was declared last
+    would silently win."""
+    out = expand_tokens(["dismissal"])
+    assert "увольнение" in out
+    assert any("ishdan" in t for t in out)
+
+
+def test_english_is_a_key_but_never_an_emitted_term():
+    """English can start a lookup; it must never come out of one.
+
+    No English text exists anywhere in the corpus, so an English term in a
+    tsquery cannot match a document — it only consumes the 60-term budget in
+    `build_tsquery`, which truncates rather than errors. When these entries
+    were first added they pushed an Uzbek query from 58 terms past the cap,
+    and the overflow dropped the transliterated Cyrillic forms that are the
+    only route from a Latin query to the Cyrillic-only Labour Code.
+    """
+    from app.services.rag.synonyms import _ENGLISH_TERMS, _norm
+
+    english = {_norm(t) for t in _ENGLISH_TERMS}
+    for term in ("dismissal", "contract", "employee", "divorce"):
+        out = set(expand_tokens([term]))
+        assert out, f"{term} should still expand"
+        assert not (out & english), f"{term} expanded to another English term"
+
+
+def test_adding_english_did_not_cost_uzbek_any_terms():
+    """The regression above, pinned at the level it actually bit."""
+    terms = _terms(
+        "Xodim o'z tashabbusi bilan mehnat shartnomasini bekor qiladi",
+        Language.UZ_LATN,
+    )
+    assert any("ташаббусига".startswith(t.strip("()")) for t in terms) or any(
+        "ташабб" in t for t in terms
+    ), sorted(terms)
+    assert len(terms) <= 60, "at the truncation cap; something will be dropped"
