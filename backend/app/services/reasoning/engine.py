@@ -28,7 +28,7 @@ from app.services.reasoning import risk as risk_mod
 from app.services.reasoning import validator as validator_mod
 from app.services.memory.manager import MemoryContext, memory_manager
 from app.services.reasoning.intent import Intent, classify_intent, conversational_reply
-from app.services.reasoning.scope import looks_legal
+from app.services.reasoning.scope import looks_legal, looks_non_legal
 from app.services.reasoning.verbosity import (
     Verbosity,
     is_bare_directive,
@@ -94,6 +94,20 @@ class LegalAnswer:
             "refusal_reason": self.refusal_reason,
             "follow_ups": self.follow_ups,
         }
+
+
+def _is_everyday(question: str, lang: Language) -> bool:
+    """Whether to answer conversationally instead of from the corpus.
+
+    Requires *positive* evidence of an everyday topic, not merely the absence
+    of legal vocabulary. Getting this backwards sends real legal questions —
+    ones phrased in ordinary words, which is most of them — down a path that
+    answers from the model's memory with no citation and no source panel.
+
+    The streaming and non-streaming paths must agree on this, so they share one
+    predicate rather than each spelling out the condition.
+    """
+    return looks_non_legal(question) and not looks_legal(question, lang.value)
 
 
 def _resolve_turn(
@@ -267,7 +281,7 @@ class ReasoningEngine:
         # model follows the core prompt's "if the question isn't legal"
         # branch and deflects, and a deflection is a well-formed answer that
         # passes validation cleanly — there is no rejection to hook.
-        if not document_text and not looks_legal(question, lang.value):
+        if not document_text and _is_everyday(question, lang):
             return await self._general_answer(question, lang, mode, 0, started, provider)
 
         retrieval_query = _retrieval_query(question, document_text)
@@ -282,7 +296,7 @@ class ReasoningEngine:
         )
 
         if context.is_empty:
-            if not looks_legal(question, lang.value):
+            if _is_everyday(question, lang):
                 return await self._general_answer(
                     question, lang, mode, retrieval.took_ms, started, provider
                 )
@@ -368,9 +382,7 @@ class ReasoningEngine:
         question, verbosity = _resolve_turn(question, history)
         lang = language or detect_language(question)
         intent = Intent.LEGAL if document_text else classify_intent(question)
-        if intent is not Intent.LEGAL or (
-            not document_text and not looks_legal(question, lang.value)
-        ):
+        if intent is not Intent.LEGAL or (not document_text and _is_everyday(question, lang)):
             if intent is Intent.LEGAL:
                 result = await self._general_answer(question, lang, mode, 0, started, provider)
             else:
@@ -398,12 +410,12 @@ class ReasoningEngine:
         }
 
         if context.is_empty:
-            if looks_legal(question, lang.value):
-                result = self._no_context_answer(lang, mode, retrieval.took_ms, started)
-            else:
+            if _is_everyday(question, lang):
                 result = await self._general_answer(
                     question, lang, mode, retrieval.took_ms, started, provider
                 )
+            else:
+                result = self._no_context_answer(lang, mode, retrieval.took_ms, started)
             yield {"type": "delta", "text": result.answer}
             yield {"type": "done", "result": result.to_dict()}
             return
