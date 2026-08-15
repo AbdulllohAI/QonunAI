@@ -12,7 +12,7 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-235%20passing-2ea44f)](backend/tests/)
+[![Tests](https://img.shields.io/badge/tests-461%20passing-2ea44f)](backend/tests/)
 [![Recall@5](https://img.shields.io/badge/Recall%405-0.931-2ea44f)](backend/benchmarks/)
 [![MRR](https://img.shields.io/badge/MRR-0.852-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -43,6 +43,13 @@ generic "looks fine to me."
 
 *Real conversation against the actual running app — retrieval, LLM generation, and citation-tagged output, not a mockup.*
 
+Two more below show behaviour rather than chrome:
+[answering in the script you typed](#reply-in-the-script-the-user-typed) and
+[answering at the length you asked for](#answer-at-the-length-that-was-asked-for).
+Both are drawn from recorded sessions against `uzlex-ai.fly.dev` — the
+questions, answers, sources, retrieval times and elapsed times in them are the
+captured ones, rendered as a terminal rather than filmed from the browser.
+
 ## 🏆 Key features
 
 | | |
@@ -56,6 +63,9 @@ generic "looks fine to me."
 | 🌐 **Trilingual + dual-script** | Uzbek Latin↔Cyrillic transliteration on both queries and index. Ask in Russian, retrieve from a Cyrillic-only source, answer in Russian — cross-language retrieval, not just translation. |
 | 🚦 **Independent risk scoring** | The risk level shown is the *higher* of the model's own claim and a rule-based assessor (procedural deadlines, criminal exposure, conflicting provisions) — under-stating risk is the expensive failure mode here. |
 | 🔀 **Provider-agnostic LLM layer** | Anthropic, any OpenAI-compatible endpoint (Groq, Gemini, vLLM, Together), or local Ollama — swappable via one env var, no code changes. |
+| 💬 **Answers shaped by how you asked** | Reply in the script you typed, at the length you asked for, and answer ordinary questions like a person instead of deflecting — see [Answering the way the question was asked](#-answering-the-way-the-question-was-asked). |
+| 🔑 **Four ways to sign in** | Email, Telegram, Google, and phone-by-SMS — each dormant until its provider is configured, never a button that cannot work. See [Accounts and sign-in](#-accounts-and-sign-in). |
+| 💳 **Plans and billing** | Free / signed-in / Pro tiers with per-day request limits, and a Payme merchant integration for Pro — see [Plans and billing](#-plans-and-billing). |
 
 ## 🧱 Tech stack
 
@@ -134,6 +144,64 @@ enforced mechanically, not just requested:
    swaps it in — so a stripped citation never stays on screen, even for the
    tokens that streamed before validation ran.
 
+### The way this guarantee actually got broken
+
+Worth recording, because the mechanism was subtle and the lesson generalises.
+
+Everything above protects answers that go *through* retrieval. It says nothing
+about a question that never reaches it — and a routing change quietly created
+exactly that path.
+
+Deciding "not a legal question" used to happen *after* retrieval, where the
+real work was done by a different rule: **a question that found sources is
+legal by demonstration.** The scope check only sorted what was left over, so
+it could afford to be a rough heuristic.
+
+Moving that check in front of retrieval — a fix for a real problem, since a
+deflection passes validation cleanly and gives nothing to hook — made it the
+sole arbiter. Under that load its default was backwards: *absence of legal
+vocabulary became proof of a non-legal question.*
+
+Measured on ordinary phrasings, **4 of 11** genuine legal questions fell
+through, because no word in them is an act name, an article number, or a
+glossary term:
+
+| Question | Why it slipped |
+|---|---|
+| «Ishdan boʻshash tartibi qanday?» | dismissal — no statutory term in the sentence |
+| «Ишдан бўшаш тартиби қандай?» | same, Cyrillic |
+| «Как разделить имущество при разводе?» | divorce, property division |
+| «How many days of annual leave am I entitled to?» | entitlement phrased as a person would |
+
+Each was answered from the model's own memory: confident specifics, **no
+citation, no source panel, `retrieval_ms: 0`.** The one failure mode the
+project exists to prevent, reached through the component meant to prevent it —
+and invisible from outside, because an ungrounded answer looks exactly like a
+grounded one until you check whether any source was consulted.
+
+The prompt-level backstop did not save it either. `GENERAL_SYSTEM` already
+says, in as many words, to treat a disguised legal question as legal and
+refuse to answer from memory. The model ignored it — the same lesson as point
+3 above, arriving a second time by a different door: **grounding holds because
+of a mechanism, not because the prompt asks for it.**
+
+The fix is not more legal keywords. Law has no closed vocabulary, so every
+gap in such a list is silent and dangerous. The *non-legal* side is enumerable
+in the only sense that matters: a miss there is harmless. So the conversational
+path now requires **positive evidence of an everyday topic** — cooking,
+weather, sport, translation — and the deliberate gap between "looks legal" and
+"looks everyday" falls to the legal side. An unrecognised question about
+restaurants gets a stiff "the retrieved provisions don't cover this", which is
+a worse conversation and not a wrong answer.
+
+Verified on the live instance after the fix — the same question that had
+returned `retrieval_ms: 0`:
+
+```
+Ishdan bo'shash tartibi qanday?   → retrieval_ms 1692 · 9 sources · 3 citations
+Osh qanday pishiriladi?           → retrieval_ms    0 · conversational, as intended
+```
+
 ## 🔗 Deep linking into lex.uz
 
 A citation that opens a four-megabyte document and leaves you to scroll isn't a
@@ -171,6 +239,165 @@ article number, or genuinely ambiguous ones, and degrade to document links.
 # Honours lex.uz's published Crawl-delay of 20s — do not parallelise.
 docker compose exec backend python -m app.workers.backfill_anchors --dry-run
 ```
+
+## 💬 Answering the way the question was asked
+
+Three behaviours that sound like prompt tweaks and were not. Each needed a
+mechanism, and each failed first in a way worth recording.
+
+### Reply in the script the user typed
+
+Uzbek is written in both Latin and Cyrillic, and the corpus is mostly
+Cyrillic. Asked in Latin, the model kept answering in the script of the
+*sources* it had just read — reasonable-looking behaviour that is wrong for a
+reader who cannot comfortably read the other script.
+
+Detection was never the problem; it was correct from the start. The instruction
+was simply being ignored, and it started being obeyed only once the prompt
+**named the letters** rather than the script — "ў, қ, ғ, ҳ" instead of
+"Cyrillic".
+
+<div align="center">
+<img src="assets/script-mirroring.gif" alt="The same question asked in Uzbek Latin and Uzbek Cyrillic, each answered in the script it was asked in, both cited to the same Cyrillic-only article" width="720"/>
+</div>
+
+*The same question in both scripts, against the live API. Note the source in
+each: one Cyrillic article, 106-modda of the Labour Code, answered back in
+whichever script the question used.*
+
+### Answer at the length that was asked for
+
+"juda qisqa" (very short) produced a **2,541-character** answer — longer than
+the default. The instruction was in the cached system prefix, and a cached
+prefix loses to immediate context and to the model's own previous turns. Moving
+the restatement into the user turn, where recency actually carries, fixed it.
+
+<div align="center">
+<img src="assets/verbosity.gif" alt="The same legal question asked plainly and then with a very-short directive; the second answer is a third the length and still carries citations" width="720"/>
+</div>
+
+Measured against the live API, *«Ishdan boʻshash tartibi qanday?»* asked twice:
+
+| Same question | Answer | Sources |
+|---|---|---|
+| asked plainly | 1,750 chars | 10 |
+| `+ juda qisqa` | **615 chars** | 9 |
+
+The point of the second column is that shortening changes the *answer*, not the
+grounding — the short reply still retrieves and still cites.
+
+The directive is also *remembered*: ask for short answers once and following
+turns stay short, and `_resolve_turn` walks back past runs of consecutive
+directives so "shorter" then "even shorter" still resolves to the last real
+question rather than to another directive.
+
+### Answer ordinary questions like a person
+
+Greetings, small talk and "what can you do" are answered deterministically,
+without an LLM call. Beyond those, an everyday question gets a warm, ordinary
+reply instead of a bureaucratic non-answer:
+
+```
+"Salom! Sen nima qila olasan?"  →  "Salom! Men Oʻzbekiston Respublikasining
+                                    qonunlari boʻyicha savollarga javob beraman…"
+```
+
+This is the feature that created the grounding hole described
+[above](#the-way-this-guarantee-actually-got-broken) — worth reading as a pair,
+because the pleasant behaviour and the dangerous one came from the same change.
+
+## 🔑 Accounts and sign-in
+
+Four methods, all live in the API. Each stays **dormant until its provider is
+configured** — an unconfigured provider returns a clean `503`, the UI does not
+render its button, and no third-party script is loaded. A sign-in button that
+cannot work is worse than no button.
+
+| Method | Endpoint | What makes it trustworthy |
+|---|---|---|
+| Email + password | `POST /api/v1/auth/register` · `/login` | bcrypt, 8-char minimum enforced on both sides |
+| Telegram | `POST /api/v1/auth/telegram` | HMAC over the login payload, key = `SHA256(bot_token)`; 24 h TTL |
+| Google | `POST /api/v1/auth/google` | RS256 ID token, **`aud` checked against our own client id** |
+| Phone (SMS) | `POST /api/v1/auth/phone/request` · `/verify` | hashed codes, 5-guess cap, 5-min expiry, 60 s resend cooldown |
+
+Two of those checks are the ones most often missing, so they get named
+explicitly:
+
+- **Google: verifying the signature is not enough.** An ID token is signed by
+  Google for *some* application. Accept any validly-signed token and an
+  attacker signs into their own unrelated site, posts the token they were
+  given here, and is logged in as that Google account — signature perfectly
+  valid, just not issued for us. `aud` must equal our client id.
+- **Phone: nobody else vouches for the user.** There is no third party
+  attesting anything — we send a code and trust whoever reads it — so the
+  whole burden sits on four controls. Codes are stored only as a SHA-256 hash
+  salted with *both* the phone number and `SECRET_KEY` (the number-salt stops
+  a hash being replayed against a different number; the app secret means a
+  stolen table alone cannot precompute all million codes). Six digits is a
+  million combinations, which a script walks in minutes — the **5-attempt cap**
+  is the control, not the code length, and the failure is counted *before* the
+  comparison returns or the cap never bites.
+
+Numbers normalise to E.164 before anything else, so `90 123 45 67`,
+`+998 90 123-45-67` and `998901234567` are one account rather than three, two
+of them unreachable. And `/phone/request` answers identically whether or not
+the number is registered — a distinguishable response would make it a tool for
+testing which numbers have accounts.
+
+> Accounts created through Telegram, or through Google without a verified
+> address, have **no email**. The frontend `User` type said `string` while the
+> API had already started returning `null`, which crashed the account menu on
+> `email.split('@')` — for exactly the users those two providers had just
+> enabled. Display names now fall back name → email → phone → generic, and
+> every branch is reachable.
+
+## 💳 Plans and billing
+
+| Tier | Requests / day | How you get it |
+|---|---|---|
+| Anonymous | 50 | just use it — no sign-up |
+| Signed in | 500 | any of the four sign-in methods |
+| Pro | 5,000 | Payme subscription |
+
+Limits are per rolling day (`RATE_LIMIT_WINDOW_SECONDS = 86400`) and enforced
+in Redis.
+
+Pro is billed through **Payme (Paycom)**, whose Merchant API is JSON-RPC 2.0
+over a single endpoint — `POST /api/v1/payments/payme` — with amounts in
+*tiyin*, states `1 / 2 / -1 / -2`, and **HTTP 200 on every response** including
+errors, which are carried in the JSON-RPC `error` object instead.
+
+Four things there are about money rather than protocol, and they are what the
+tests aim at:
+
+- **Every handler is idempotent.** Payme retries. A second `CreateTransaction`
+  for the same id must return the existing transaction, not open a second
+  charge; a repeated `PerformTransaction` must not extend the subscription
+  twice.
+- **The amount is checked, not accepted.** 79,000 soʻm is 7,900,000 tiyin
+  exactly — anything else is refused rather than taken at whatever was sent.
+  Floats are refused too; they do not survive reconciliation.
+- **The merchant key is compared in constant time.** This endpoint is public
+  by necessity, and a plain `==` leaks the secret's prefix through timing.
+- **Unperformed transactions expire.** Payme cancels after 12 hours; honouring
+  one later would take money for a checkout the payer abandoned.
+
+Billing stays off until `PAYME_ENABLED=true`, and the checkout button is hidden
+while it is off.
+
+## 🎨 Interface
+
+The frontend is a full product surface, not a debug console: a marketing
+landing page, a streamed chat view with deep-linked citation cards and risk
+badges, sign-in and pricing dialogs, and a document-analysis view.
+
+- **Design tokens, not hard-coded colours.** One CSS-variable palette in
+  `globals.css` with role names (`surface`, `border`, `accent`, `muted`), and
+  Tailwind maps to those rather than to raw hex — so dark mode is a token swap
+  under a `class` strategy, not a second set of utilities per element.
+- **Contrast and touch targets are checked, not eyeballed.** Body text meets
+  WCAG AA against both palettes; interactive controls are ≥44 px tall.
+- **16 px inputs on mobile**, below which iOS Safari zooms the page on focus.
 
 ## Setup
 
@@ -246,6 +473,10 @@ and time-to-first-token rather than in the retriever.
 | `GET /api/v1/laws` · `/{id}/tree` | Browse acts and their structural trees |
 | `GET /api/v1/laws/{id}/articles/{n}/timeline` | Version history and diffs |
 | `GET /api/v1/alerts` | New / amended acts |
+| `POST /api/v1/auth/register` · `/login` · `/refresh` · `/me` | Email accounts and session tokens |
+| `POST /api/v1/auth/telegram` · `/google` | Social sign-in — verify a signed payload, issue our own tokens |
+| `POST /api/v1/auth/phone/request` · `/phone/verify` | SMS code request and exchange |
+| `POST /api/v1/payments/payme` | Payme merchant JSON-RPC endpoint (`CheckPerformTransaction`, `CreateTransaction`, `PerformTransaction`, `CancelTransaction`, `CheckTransaction`, `GetStatement`) |
 | `POST /api/v1/admin/ingest` | Trigger ingestion (admin) |
 | `GET /api/v1/admin/connectors/health` | Connector reachability + selector validation |
 | `GET /health` | Liveness, corpus size, provider status |
@@ -256,12 +487,30 @@ and time-to-first-token rather than in the retriever.
 cd backend && pytest tests/ -v
 ```
 
-235 unit tests, no database or network required — verified passing. They cover
+461 unit tests, no database or network required — verified passing. They cover
 the places where a silent regression is most damaging: transliteration (halves
 Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
 validation (hallucinations reaching users), the hierarchy-of-force rules
-(wrong legal conclusions), and anchor extraction (citations that open the
-wrong article).
+(wrong legal conclusions), anchor extraction (citations that open the wrong
+article), the scope gate (legal questions answered without sources), token
+verification for all three sign-in providers, and the Payme state machine.
+
+Some of them assert things that read oddly until you know what they caught:
+
+```python
+assert "compare_digest" in inspect.getsource(payme.check_auth)
+assert claims.get("email_verified") is True   # not `in (True, "true")`
+```
+
+The first pins a constant-time comparison on a public endpoint against a
+future refactor that would "simplify" it to `==`. The second exists because
+Python holds `1 == True`, so a membership test silently accepts the integer
+`1` as a verified Google address — found by a test that fed it exactly that.
+
+> **Never pipe the command that gates a deploy.** `pytest -q | tail -2 && git
+> commit && fly deploy` returns *tail's* exit code, so the gate is always
+> green. That is how a syntax error reached production here and took the API
+> down with a crash loop.
 
 ## 🚧 Deployment status
 
@@ -376,6 +625,22 @@ IPs on app creation, which must be released for a service that carries no auth.
 `RERANKER_ENABLED` and the rate limits are **Fly secrets**, and secrets silently
 shadow `fly.toml [env]`. Check `flyctl secrets list` before trusting any value
 in the committed config.
+
+### Optional providers, and what each needs
+
+Sign-in and billing are built and tested, but every one of them needs an
+account created under the operator's own name. Until then each stays dormant
+by design: the API returns `503`, the UI omits the control, and no third-party
+script is loaded.
+
+| Feature | Secrets (backend) | Public (frontend) | Also required |
+|---|---|---|---|
+| Telegram login | `TELEGRAM_BOT_TOKEN` | `NEXT_PUBLIC_TELEGRAM_BOT` | @BotFather bot + `/setdomain` |
+| Google login | `GOOGLE_CLIENT_ID` | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` *(same value)* | OAuth client + authorised origin |
+| Phone login | `ESKIZ_EMAIL`, `ESKIZ_PASSWORD`, `ESKIZ_SENDER` | `NEXT_PUBLIC_PHONE_LOGIN=true` | Eskiz.uz account |
+| Payme (Pro) | `PAYME_KEY`, `PAYME_MERCHANT_ID`, `PAYME_ENABLED=true` | `NEXT_PUBLIC_PAYME_MERCHANT_ID` | merchant cabinet + sandbox checklist |
+
+Set them with `flyctl secrets set` — never in `fly.toml`, which is committed.
 
 ## 📊 Retrieval benchmark
 
@@ -652,14 +917,15 @@ Being direct about these rather than glossing over them:
   this would violate robots.txt — the legitimate route to national-scale
   coverage is a bulk-data agreement with the Ministry of Justice, not a faster
   scraper.
-- **Retrieval quality is measured, and not yet at target.** `uzlegal-v1`
-  (`backend/benchmarks/`) scores **Recall@5 = 0.833** against a 0.90 target and
-  **MRR = 0.694** against 0.75, on 30 questions whose gold labels were read from
-  the corpus and hand-verified. That is up from 0.433 at first measurement, but
-  roughly one question in six still misses the governing article. The remaining
-  failures share a shape: the article's title *paraphrases* the question rather
-  than sharing its words, so neither the heading branch nor lexical search
-  fires.
+- **Retrieval quality is measured, and two questions still miss.** `uzlegal-v1`
+  (`backend/benchmarks/`) now scores **Recall@5 = 0.931** and **Recall@10 =
+  0.983** against targets of 0.90 and 0.95, on 58 questions across all 13
+  acts — up from 0.433 at first measurement. `uz-104` and `uz-160` remain
+  outside the top five, and are left failing on purpose: both are reachable
+  only by mapping one inflected verb form to one statutory phrase, which is
+  where useful generalisation stops and benchmark-fitting begins. A working
+  cross-encoder reranker is the honest fix, and that is blocked on latency
+  (above).
 - **Not production-hardened.** Secrets live in a plaintext `.env` (correctly
   gitignored, but not vaulted), there's no rate-limit-aware secrets rotation,
   and this hasn't been through a security review. See the ingestion caveats
