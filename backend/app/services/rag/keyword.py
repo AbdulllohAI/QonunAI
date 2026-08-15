@@ -80,8 +80,16 @@ def build_tsquery(query: str, language: Language) -> tuple[str, str]:
     # left to Postgres, which has no equivalent alternation.
     needs_stemming = config in ("simple", "russian")
 
+    # Script variants exist to bridge Uzbek Latin and Uzbek Cyrillic, which are
+    # the same language in two alphabets. Applied to English they transliterate
+    # the user's own words into nonsense — "how many days of annual leave"
+    # becomes "ҳоw манй дайс оф аннуал леаве" — which matches nothing and, worse,
+    # takes nine of the twenty-one slots in the 60-term budget below, crowding
+    # out the Uzbek and Russian terms the glossary just supplied.
+    variants = [query] if language is Language.EN else script_variants(query)
+
     tokens: list[str] = []
-    for variant in script_variants(query):
+    for variant in variants:
         content = content_tokens(variant, language.value)
         # Synonym expansion belongs here, in the lexical branches, and not in
         # the dense one: padding the embedded text with synonyms moves the

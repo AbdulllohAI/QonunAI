@@ -273,3 +273,18 @@ def test_adding_english_did_not_cost_uzbek_any_terms():
         "ташабб" in t for t in terms
     ), sorted(terms)
     assert len(terms) <= 60, "at the truncation cap; something will be dropped"
+
+
+def test_english_queries_are_not_transliterated_into_cyrillic():
+    """Script variants bridge Uzbek Latin and Cyrillic — the same language in
+    two alphabets. Applied to English they produced "ҳоw манй дайс оф аннуал
+    леаве", which matches nothing and took nine of twenty-one slots in the
+    60-term budget, crowding out the terms the glossary had just supplied."""
+    import re
+
+    _, tsquery = build_tsquery("How many days of annual leave am I entitled to?", Language.EN)
+    terms = [t.strip().removesuffix(":*") for t in tsquery.split("|")]
+    garbage = [t for t in terms if re.fullmatch(r"[а-яёқғҳўй]+", t) and t not in {"отпуск", "татил"}]
+    assert not any(t in garbage for t in ("ҳоw", "манй", "дайс", "аннуал", "леаве")), terms
+    # and the real bridge survived
+    assert any("отпуск" in t for t in terms), terms
