@@ -216,6 +216,16 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = 25
 
     # ------------------------------------------------------------ limits
+    # --------------------------------------------------------------- phone
+    ESKIZ_EMAIL: str = ""
+    ESKIZ_PASSWORD: str = ""
+    """Eskiz.uz account credentials. Secrets — they can send SMS on the
+    account's balance, so a leak is someone else's phone bill."""
+
+    ESKIZ_SENDER: str = "4546"
+    """Registered sender id. Eskiz rejects anything not approved for the
+    account, so this must match what they issued."""
+
     # -------------------------------------------------------------- google
     GOOGLE_CLIENT_ID: str = ""
     """OAuth client id from the Google Cloud console.

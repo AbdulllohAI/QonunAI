@@ -451,6 +451,11 @@ class User(Base):
     google_sub: Mapped[str | None] = mapped_column(
         String(64), unique=True, index=True, nullable=True
     )
+    #: E.164, e.g. +998901234567. Normalised on the way in so the same number
+    #: typed as 90 123 45 67 or +998 90 123-45-67 resolves to one account.
+    phone: Mapped[str | None] = mapped_column(
+        String(20), unique=True, index=True, nullable=True
+    )
     full_name: Mapped[str | None] = mapped_column(String(255))
     role: Mapped[UserRole] = mapped_column(_pg_enum(UserRole, "user_role"), default=UserRole.USER)
     preferred_language: Mapped[Language] = mapped_column(
@@ -733,4 +738,27 @@ class PaymeTransaction(Base):
     perform_time: Mapped[int] = mapped_column(BigInteger, default=0)
     cancel_time: Mapped[int] = mapped_column(BigInteger, default=0)
     reason: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PhoneOtp(Base):
+    """A one-time code sent by SMS.
+
+    The code itself is never stored — only a hash. A database leak should not
+    hand an attacker a working login for every pending sign-in, and there is no
+    reason to be able to read a code back: verification only ever needs to
+    compare.
+    """
+
+    __tablename__ = "phone_otps"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    phone: Mapped[str] = mapped_column(String(20), index=True)
+    code_hash: Mapped[str] = mapped_column(String(128))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    #: Wrong guesses so far. Six digits is a million combinations, which a
+    #: script exhausts in minutes; capping attempts is what makes the code safe,
+    #: not its length.
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

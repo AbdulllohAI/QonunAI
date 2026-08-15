@@ -10,7 +10,9 @@ from app.core.deps import get_current_user
 from app.core.security import create_token, decode_token, hash_password, verify_password
 from app.db.models import User
 from app.db.session import get_session
-from app.services.auth import google, telegram
+from app.core.logging import get_logger
+from app.services.auth import google, sms, telegram
+from app.services.auth import phone as phone_auth
 from app.schemas.common import (
     LoginRequest,
     RefreshRequest,
@@ -19,6 +21,7 @@ from app.schemas.common import (
     UserOut,
 )
 
+log = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
@@ -190,6 +193,76 @@ async def google_login(
 
     await session.commit()
     await session.refresh(user)
+
+    if not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled")
+
+    return _tokens(user)
+
+
+@router.post("/phone/request", status_code=status.HTTP_202_ACCEPTED)
+async def phone_request(
+    payload: dict, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Send a one-time code by SMS.
+
+    Answers the same way whether or not the number already has an account.
+    Telling a caller "no such user" here turns the endpoint into a way to test
+    which phone numbers are registered.
+    """
+    if not sms.sms_configured():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Phone sign-in is not configured"
+        )
+
+    try:
+        issued = await phone_auth.request_code(session, str(payload.get("phone") or ""))
+    except phone_auth.PhoneAuthError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+
+    try:
+        await sms.send_sms(
+            issued.phone, f"QonunAI tasdiqlash kodi: {issued.code}"
+        )
+    except sms.SmsError as exc:
+        # The code is already stored, but the user will never see it, so say so
+        # rather than leaving them waiting on a message that is not coming.
+        log.error("phone_sms_failed", extra={"error": str(exc)[:200]})
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, "SMS yuborib boʻlmadi, keyinroq urinib koʻring"
+        ) from None
+
+    return {"sent": True, "expires_in": phone_auth.CODE_TTL_SECONDS}
+
+
+@router.post("/phone/verify", response_model=TokenPair)
+async def phone_verify(
+    payload: dict, session: AsyncSession = Depends(get_session)
+) -> TokenPair:
+    """Exchange a valid code for tokens, creating the account on first use."""
+    if not sms.sms_configured():
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Phone sign-in is not configured"
+        )
+
+    try:
+        number = await phone_auth.verify_code(
+            session, str(payload.get("phone") or ""), str(payload.get("code") or "")
+        )
+    except phone_auth.PhoneAuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from None
+
+    user = (
+        await session.execute(select(User).where(User.phone == number))
+    ).scalar_one_or_none()
+
+    if user is None:
+        # No email, no password: a phone account has neither, and inventing
+        # either would store a credential nobody holds.
+        user = User(phone=number, email=None, hashed_password=None)
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
 
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Account is disabled")
