@@ -12,7 +12,7 @@ Every legal claim resolves to a real `[Sn]` source tag. Citations to articles th
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-000000?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL%20%2B%20pgvector-4169E1?logo=postgresql&logoColor=white)](https://github.com/pgvector/pgvector)
-[![Tests](https://img.shields.io/badge/tests-461%20passing-2ea44f)](backend/tests/)
+[![Tests](https://img.shields.io/badge/tests-503%20passing-2ea44f)](backend/tests/)
 [![Recall@5](https://img.shields.io/badge/Recall%405-0.931-2ea44f)](backend/benchmarks/)
 [![MRR](https://img.shields.io/badge/MRR-0.852-2ea44f)](backend/benchmarks/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -487,7 +487,7 @@ and time-to-first-token rather than in the retriever.
 cd backend && pytest tests/ -v
 ```
 
-461 unit tests, no database or network required — verified passing. They cover
+503 unit tests, no database or network required — verified passing. They cover
 the places where a silent regression is most damaging: transliteration (halves
 Uzbek recall if wrong), hierarchy parsing (wrong citations), citation
 validation (hallucinations reaching users), the hierarchy-of-force rules
@@ -750,6 +750,34 @@ groups and a test asserts that in both directions.
 Recall@5 went 0.877 → 0.912 and Recall@10 0.930 → 0.965, both clearing target
 on the 57-question set. Median retrieval rose from 1327 ms to 1441 ms — the
 expanded term list costs something, and it stays well inside budget.
+
+### Transliteration: four defects that hid 4% of the corpus
+
+94% of this corpus is Cyrillic, so the Latin↔Cyrillic layer decides whether a
+Latin query reaches the text at all. Four defects lived in it, each silent in
+the same way: the query succeeds, retrieval returns *something*, and only the
+governing article is missing.
+
+Measured over the full Uzbek heading vocabulary — 3,683 distinct words, 20,719
+occurrences — the share unreachable from any Latin spelling was **4.05%**. It
+is now **0.14%**.
+
+| Defect | What it hid |
+|---|---|
+| **The glottal stop vanished.** `normalize_apostrophes` folds every apostrophe glyph into U+2018 before the mapping table runs; the table only had rules for U+02BC and U+0027, written for raw input before normalisation was put in front of them. | `ta'til` → `та‘тил` → `татил`, which cannot prefix-match the corpus form **`таътил`**. Also hit the glossary's own `da'vo`/`даъво` and `mas'uliyat`/`масъулият`. |
+| **Word-initial `e` is `э`, not `е`.** Uzbek Cyrillic reserves `е` for /ye/, which Latin spells `ye` and the table already handled. | 98 distinct words, **532 occurrences**, including `этиш` at 124 — about as common as an Uzbek verb gets. |
+| **`o‘` and `g‘` are single letters** and must be matched before the y-digraphs. Matching `yo` first split `yo‘l` down the middle. | `yo‘l` → **`ёъл`**, a string that appears nowhere. Road, lost, passenger: none reachable. |
+| **Latin `ts` is `ц`** in the Russian loanwords that fill legal text. | 230 occurrences — `лицензия`, `декларация`, `процессуал`. |
+
+The last one cannot be a table rule, because `ts` also arises where a native
+`t` meets a native `s`: `ko‘rsatsa` is `кўрсатса`, not `кўрсаца`. Both readings
+are offered as separate candidates in the OR-query instead, and the wrong one
+matches nothing.
+
+The safety property worth stating: comparing the reachable set before and
+after, **173 words were gained and none were lost** — the change is strictly
+additive at this layer. The index is built from the raw columns, so this is
+query-side only and needed no re-indexing.
 
 ### Auditing the benchmark itself
 
